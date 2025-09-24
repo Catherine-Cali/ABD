@@ -1,14 +1,27 @@
-import { useState, useEffect } from 'react';
-import { Check, X, ChevronRight, Award, BookOpen, Sun, Moon, Lightbulb } from 'lucide-react';
+import { useMemo, useState } from "react";
 
-interface Question {
+/** ---- Types ---- **/
+interface LegacyQuestionSingle {
   id: number;
   question: string;
   choices: string[];
-  correctIndex: number;
-  explication: string;
+  correctIndex?: number;        // ancien format (1 bonne réponse)
+  explication?: string;
+}
+interface LegacyQuestionMulti extends Omit<LegacyQuestionSingle, "correctIndex"> {
+  correctIndices?: number[];    // nouveau format (plusieurs bonnes réponses)
+}
+type LegacyQuestion = LegacyQuestionSingle | LegacyQuestionMulti;
+
+interface QuestionNormalized {
+  id: number;
+  question: string;
+  choices: string[];
+  correct: number[];            // tableau d’index corrects normalisé
+  explication?: string;
 }
 
+/** ---- Util ---- **/
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -17,1432 +30,1819 @@ function shuffleArray<T>(array: T[]): T[] {
   }
   return arr;
 }
+function setsEqual(a: Set<number>, b: Set<number>) {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
 
-// QUESTIONS
-const QCM_QUESTIONS: Question[] = [
-  {
-    id: 1,
-    question: "Le droit de la sécurité sociale…",
-    choices: [
-      "régit les relations collectives entre les salariés et les employeurs privés.",
-      "rassemble les règles dont l’objectif est de garantir l’individu contre certains risques sociaux.",
-      "comprend le droit du travail.",
-      "régit les relations entre les fonctionnaires et l’administration qui les emploie."
-    ],
-    correctIndex: 1,
-    explication: "Il rassemble les règles destinées à protéger l'individu contre les risques sociaux (maladie, vieillesse, chômage)."
-  },
-  {
-    id: 2,
-    question: "Les traités internationaux…",
-    choices: [
-      "sont conclus entre les organisations syndicales de salariés et d’employeurs représentatives dans leur champ d’application.",
-      "ne peuvent être conclus qu’entre deux États.",
-      "sont, le plus souvent, négociés au sein de l’Organisation Internationale du Travail lorsqu’ils concernent le droit du travail.",
-      "ne peuvent porter que sur le droit du travail."
-    ],
-    correctIndex: 2,
-    explication: "Dans le domaine social, les conventions multilatérales sont majoritairement négociées à l'OIT avant d'être ouvertes à la ratification des États."
-  },
-  {
-    id: 3,
-    question: "L’Organisation Internationale du travail est…",
-    choices: [
-      "une agence spécialisée du Conseil de l’Europe.",
-      "une agence spécialisée de l’ONU sur les questions de droit social.",
-      "une agence spécialisée de l’ONU sur les questions culturelles.",
-      "une agence spécialisée de l’Union Européenne."
-    ],
-    correctIndex: 1,
-    explication: "L'OIT est, depuis 1946, l'agence spécialisée de l'ONU chargée des normes internationales du travail."
-  },
-  {
-    id: 4,
-    question: "La Charte sociale européenne…",
-    choices: [
-      "peut être invoquée devant la Cour Européenne des Droits de l’Homme dont le rôle est de veiller à son application par les États signataires.",
-      "a été rédigée par l’Union Européenne.",
-      "ne s’impose pas au juge français selon la Cour de cassation (absence d’effet direct).",
-      "n’a pas été ratifiée par la France."
-    ],
-    correctIndex: 2,
-    explication: "La Cour de cassation considère que la Charte sociale européenne n'a pas d'effet direct et ne peut donc être invoquée directement devant les juridictions françaises."
-  },
-  {
-    id: 5,
-    question: "Les règlements communautaires…",
-    choices: [
-      "ne s’imposent pas au juge national (pas d’effet direct).",
-      "ne sont pas contraignants pour les États membres.",
-      "ne peuvent pas concerner la réglementation du travail.",
-      "s’imposent immédiatement aux États membres."
-    ],
-    correctIndex: 3,
-    explication: "En droit de l'Union, le règlement est d'application directe et obligatoire dans tous ses éléments dès sa publication."
-  },
-  {
-    id: 6,
-    question: "Lequel de ces actes susceptibles d’être pris par les institutions de l’Union Européenne n’est pas contraignant ?",
-    choices: [
-      "la décision",
-      "la recommandation",
-      "le règlement",
-      "la directive"
-    ],
-    correctIndex: 1,
-    explication: "Les recommandations expriment seulement une invitation à agir et n'ont aucune force obligatoire pour les États membres."
-  },
-  {
-    id: 7,
-    question: "La Cour de Justice de l’Union Européenne…",
-    choices: [
-      "peut être interrogée par une juridiction nationale sur l’application du droit communautaire.",
-      "veille au respect de la Convention Européenne de Sauvegarde des Droits de l’Homme.",
-      "ne peut pas être saisie que par un État membre (jamais par un particulier ou une entreprise).",
-      "est la seule institution juridictionnelle de l’Union Européenne."
-    ],
-    correctIndex: 0,
-    explication: "Le mécanisme de la question préjudicielle permet à toute juridiction nationale de demander à la CJUE d'interpréter le droit de l'Union."
-  },
-  {
-    id: 8,
-    question: "Lequel de ces textes ne fait pas partie du « bloc de constitutionnalité » ?",
-    choices: [
-      "Les lois constitutionnelles de 1785.",
-      "La Constitution du 4 octobre 1958.",
-      "La Charte de l’environnement de 2004.",
-      "Le préambule de la Constitution de 1946."
-    ],
-    correctIndex: 0,
-    explication: "Il n'existe pas de lois constitutionnelles de 1785 ; c'est donc le seul texte cité qui ne figure pas dans le bloc de constitutionnalité."
-  },
-  {
-    id: 9,
-    question: "Laquelle de ces propositions est exacte ?",
-    choices: [
-      "Les sujets relevant de la loi sont limitativement énumérés par la Constitution.",
-      "Le recours à l’article 49-3 de la Constitution permet au gouvernement la promulgation de loi sans vote du Parlement.",
-      "Le Conseil constitutionnel n’a qu’un rôle consultatif.",
-      "Les ordonnances permettent au gouvernement d’adopter des textes relevant du domaine législatif avec l’accord du Parlement."
-    ],
-    correctIndex: 3,
-    explication: "L'article 38 de la Constitution autorise le gouvernement, après habilitation par le Parlement, à légiférer par ordonnances dans le domaine de la loi."
-  },
-  {
-    id: 10,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "Les décrets d’application permettent d’apporter les précisions nécessaires à la mise en œuvre des lois.",
-      "Les textes d’origine réglementaire ont une valeur supérieure aux lois.",
-      "Le numéro des articles du code du travail d’origine réglementaire est précédé de la lettre R ou D.",
-      "Les décrets autonomes traitent des sujets ne relevant pas du domaine législatif."
-    ],
-    correctIndex: 1,
-    explication: "Le pouvoir réglementaire est placé sous la loi ; il ne lui est donc jamais supérieur."
-  },
-  {
-    id: 11,
-    question: "Selon la pyramide de KELSEN (de la plus importante à la moins importante) :",
-    choices: [
-      "Bloc de constitutionnalité / Bloc de légalité / Bloc de conventionnalité / Bloc réglementaire",
-      "Bloc de conventionnalité / Bloc de constitutionnalité / Bloc de légalité / Bloc réglementaire",
-      "Bloc réglementaire / Bloc de légalité / Bloc de conventionnalité / Bloc de constitutionnalité",
-      "Bloc de constitutionnalité / Bloc de conventionnalité / Bloc de légalité / Bloc réglementaire"
-    ],
-    correctIndex: 3,
-    explication: "La hiérarchie des normes place d'abord la Constitution, puis les traités internationaux, ensuite la loi, et enfin les règlements."
-  },
-  {
-    id: 12,
-    question: "Lequel de ces critères n’est pas pris en compte pour apprécier la représentativité des organisations syndicales de salariés et des organisations professionnelles d’employeurs ?",
-    choices: [
-      "Justifier d’une implantation sur tout le territoire national",
-      "Disposer d’une audience suffisante parmi ceux qu’elles entendent représenter",
-      "Être financièrement transparente",
-      "Respect des valeurs républicaines"
-    ],
-    correctIndex: 0,
-    explication: "La loi ne fait pas de l'implantation sur tout le territoire un critère de représentativité ; l'audience, la transparence financière et le respect des valeurs républicaines sont en revanche exigés."
-  },
-  {
-    id: 13,
-    question: "Pour être applicable, un accord ou une convention de branche…",
-    choices: [
-      "doit être étendu par un arrêté préfectoral.",
-      "doit être signé par une ou plusieurs organisations syndicales de salariés représentant au moins 50 %.",
-      "ne doit pas avoir fait l’objet d’une opposition par une ou plusieurs organisations syndicales représentant au moins 50 %.",
-      "doit être signé par une ou plusieurs organisations patronales dont les adhérents occupent au moins 50 % des effectifs."
-    ],
-    correctIndex: 2,
-    explication: "Depuis la loi de 2016, l'accord est valable sauf opposition de syndicats majoritaires (≥ 50 % des voix) dans un délai déterminé."
-  },
-  {
-    id: 14,
-    question: "Laquelle de ces organisations patronales n’a pas été considérée comme représentative au niveau national et interprofessionnel par l’arrêté du 18 novembre 2021 ?",
-    choices: [
-      "La Confédération des Petites et Moyennes Entreprises (CPME)",
-      "L’Union des Entreprises de Proximité (U2P)",
-      "Le Mouvement des Entreprises de France (MEDEF)",
-      "L’Union des Employeurs de l’Économie Sociale et Solidaire (UDES)"
-    ],
-    correctIndex: 3,
-    explication: "L'arrêté du 18 novembre 2021 a reconnu le MEDEF, la CPME et l'U2P comme organisations représentatives, pas l'UDES."
-  },
-  {
-    id: 15,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "Un employeur peut librement décider d’appliquer une convention de branche signée par une organisation patronale dont il n’est pas adhérent.",
-      "Il suffit à une entreprise adhérente à une organisation patronale signataire de la quitter (désadhérer) pour ne plus être tenue d’appliquer la convention de branche signée par cette dernière.",
-      "Une convention de branche non étendue ne s’applique qu’aux entreprises adhérentes aux organisations patronales signataires.",
-      "Seuls les salariés adhérents à l’une des organisations syndicales signataires peuvent bénéficier des dispositions d’une convention de branche non étendue."
-    ],
-    correctIndex: 1,
-    explication: "La désaffiliation ne libère pas rétroactivement l'entreprise des conventions signées avant son départ ; elle reste tenue d'appliquer les textes conclus auparavant."
-  },
-  {
-    id: 16,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "La procédure d’élargissement permet de rendre une convention collective de branche obligatoire pour les entreprises relevant d’un autre secteur d’activité que celui initialement couvert.",
-      "La procédure d’extension permet de rendre une convention collective de branche obligatoire à toutes les entreprises du secteur concerné, qu’elles soient ou non adhérentes à l’une des organisations patronales signataires.",
-      "Très peu de conventions collectives de branche font l’objet d’un arrêté d’extension.",
-      "Les organisations patronales non-signataires peuvent, sous certaines conditions, s’opposer à l’entrée en vigueur d’une convention de branche."
-    ],
-    correctIndex: 2,
-    explication: "En réalité, la majorité des conventions de branche sont étendues ; il est donc inexact de dire qu'elles sont 'très peu' à l'être."
-  },
-  {
-    id: 17,
-    question: "Dans les entreprises disposant de délégués syndicaux…",
-    choices: [
-      "Un accord d’entreprise est applicable dès lors qu’il est signé par des délégués syndicaux représentant 8 % du personnel.",
-      "Un accord d’entreprise est applicable dès lors qu’il est signé par un ou plusieurs délégués syndicaux représentant au moins 50 % des suffrages exprimés en faveur d’organisations représentatives au premier tour des dernières élections professionnelles.",
-      "Un accord d’entreprise peut être négocié avec des membres élus du CSE.",
-      "Un accord d’entreprise est applicable dès lors qu’il est signé par au moins trois délégués syndicaux indépendamment de leur représentativité dans l’entreprise."
-    ],
-    correctIndex: 1,
-    explication: "Le seuil majoritaire de 50 % des suffrages exprimés au premier tour des élections professionnelles conditionne la validité des accords d'entreprise."
-  },
-  {
-    id: 18,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "Le principe de faveur permet aux partenaires sociaux de déroger à des normes relevant de l’ordre public absolu.",
-      "Les dispositions « supplétives » du code du travail s’imposent uniquement en l’absence de normes définies par accord collectif.",
-      "Le principe de faveur est une exception au principe de hiérarchie des normes spécifique au droit du travail.",
-      "Le principe de faveur permet, dans certaines conditions, de faire prévaloir la norme issue d’un accord collectif sur celle issue du code du travail dès lors qu’elle est plus favorable pour les salariés."
-    ],
-    correctIndex: 0,
-    explication: "Le principe de faveur ne permet jamais de déroger aux règles d'ordre public absolu, lesquelles sont impératives et intangibles."
-  },
-  {
-    id: 19,
-    question: "Laquelle de ces normes n’est pas d’origine jurisprudentielle ?",
-    choices: [
-      "l’accord atypique",
-      "le règlement intérieur",
-      "l’usage d’entreprise",
-      "l’engagement unilatéral"
-    ],
-    correctIndex: 1,
-    explication: "Le règlement intérieur est directement encadré par le Code du travail, alors que les trois autres notions résultent initialement de la jurisprudence."
-  },
-  {
-    id: 20,
-    question: "Laquelle de ces caractéristiques ne permet pas d’identifier un usage d’entreprise ?",
-    choices: [
-      "La fixité de l’avantage accordé aux salariés",
-      "La constance de l’avantage accordé aux salariés",
-      "La généralité de l’avantage accordé aux salariés",
-      "La conclusion d’un accord collectif reconnaissant l’avantage accordé aux salariés"
-    ],
-    correctIndex: 3,
-    explication: "Un usage se définit par la constance, la généralité et la fixité de l'avantage ; la conclusion d'un accord collectif n'entre pas dans ces critères."
-  },
-  {
-    id: 21,
-    question: "Laquelle de ces caractéristiques est propre au contrat de travail et permet de le distinguer du contrat d’entreprise ?",
-    choices: [
-      "l’existence d’un lien de subordination juridique",
-      "la réalisation d’une prestation",
-      "la dépendance économique entre les cocontractants",
-      "le versement d’une contrepartie financière"
-    ],
-    correctIndex: 0,
-    explication: "Seul le contrat de travail implique un lien de subordination juridique qui se matérialise par les pouvoirs de direction, contrôle et sanction."
-  },
-  {
-    id: 22,
-    question: "Lequel de ces éléments n’entre pas dans la définition du lien de subordination juridique ?",
-    choices: [
-      "Le pouvoir de sanctionner",
-      "Le pouvoir de contrôler",
-      "Le pouvoir de commander",
-      "L’intégration à un service organisé"
-    ],
-    correctIndex: 3,
-    explication: "La définition classique repose sur les trois pouvoirs : commander, contrôler et sanctionner ; l'intégration à un service organisé n'est qu'un indice facultatif."
-  },
-  {
-    id: 23,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "Le fait qu’un chauffeur puisse être déconnecté provisoirement ou définitivement de l’application en cas de refus de course ou de signalements négatifs de clients caractérise, pour la Cour de cassation, le pouvoir de sanction dont dispose la plateforme qui propose l’application.",
-      "Selon la jurisprudence actuelle, le seul fait de mettre en relation un client avec un chauffeur (VTC) suffit à qualifier de contrat de travail la relation qui lie ce chauffeur à la plateforme numérique qui assure cette mise en relation.",
-      "Le fait qu’une application de mise en relation permette à la plateforme qui la propose de géolocaliser le chauffeur qui l’utilise démontre, pour la Cour de cassation, l’existence d’un contrôle de la plateforme sur la prestation réalisée par le chauffeur.",
-      "Le juge n’est pas lié par la qualification donnée par les parties à leur relation."
-    ],
-    correctIndex: 1,
-    explication: "La Cour de cassation exige qu'un lien de subordination soit démontré ; la simple mise en relation par plateforme ne suffit pas en soi à qualifier un contrat de travail."
-  },
-  {
-    id: 24,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "La rédaction d’un contrat de travail signé par les parties est obligatoire même en cas de recrutement sur un emploi à temps plein exercé pour une durée indéterminée (CDI temps plein).",
-      "Les clauses du contrat de travail peuvent restreindre l’exercice par le salarié de ses libertés individuelles ou collectives à la double condition que ces restrictions soient justifiées par la nature de la tâche à accomplir et proportionnées au but recherché.",
-      "Les clauses du contrat de travail ne peuvent pas être moins favorables au salarié que le code du travail ou les accords collectifs applicables sauf si des dérogations en ce sens sont prévues par le code du travail ou lesdits accords.",
-      "Le code du travail interdit l’insertion de certaines clauses dans les contrats de travail (clause de responsabilité financière, clause d’indexation du salaire sur le SMIC, etc.)."
-    ],
-    correctIndex: 0,
-    explication: "En droit français, le CDI à temps plein peut être conclu verbalement ; l’écrit n’est exigé que pour certaines mentions particulières (temps partiel, clauses spécifiques, etc.). La proposition affirmant son caractère obligatoire est donc inexacte."
-  },
-  {
-    id: 25,
-    question: "Laquelle de ces propositions est exacte ?",
-    choices: [
-      "Le salarié peut, en principe, imposer à son employeur un changement de ses conditions de travail.",
-      "L’employeur peut, en principe, imposer à son salarié un changement de ses conditions de travail.",
-      "Le salarié peut, en principe, imposer à son employeur la modification d’un élément de son contrat de travail.",
-      "L’employeur peut, en principe, imposer à son salarié la modification d’un élément de son contrat de travail."
-    ],
-    correctIndex: 1,
-    explication: "Relèvent du pouvoir de direction de l’employeur les modifications des conditions de travail (lieu, horaires, méthodes) dès lors qu’elles n’affectent pas un élément essentiel du contrat."
-  },
-  {
-    id: 26,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "L’employeur peut unilatéralement imposer un changement de ses conditions de travail à un salarié sauf si cette mesure entraîne le bouleversement de l’économie même du contrat.",
-      "L’employeur peut unilatéralement imposer un changement de ses conditions de travail à un salarié sauf si sa décision est discriminatoire ou caractérise un abus de droit.",
-      "L’employeur peut unilatéralement imposer un changement de ses conditions de travail à un salarié sauf si cette mesure entraîne incidemment la modification d’un élément de son contrat de travail.",
-      "L’employeur peut unilatéralement imposer un changement de ses conditions de travail à un salarié sans que celui-ci ne puisse jamais s’y opposer."
-    ],
-    correctIndex: 3,
-    explication: "Le salarié peut refuser la modification de son contrat ou une mesure abusive ; l’idée qu’il ne pourrait ‘jamais’ s’y opposer est donc erronée."
-  },
-  {
-    id: 27,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "Le transfert légal des contrats de travail prévu en cas de cession d’entreprise concerne tous les salariés en activité au moment de la cession, quel que soit leur contrat de travail.",
-      "Le transfert légal des contrats de travail s’impose au repreneur mais aussi aux salariés transférés qui, s’ils refusent de travailler pour leur nouvel employeur, peuvent être sanctionnés voire licenciés pour motif disciplinaire.",
-      "En cas de ‘transfert d’une entité économique conservant son identité et dont l’activité est poursuivie ou reprise’, le code du travail prévoit que les contrats de travail des salariés se poursuivent auprès du repreneur.",
-      "Le transfert conventionnel prévu par certaines conventions collectives en cas de perte de marché (nettoyage, sécurité, etc.) s’impose au repreneur mais aussi aux salariés qui, s’ils refusent de travailler pour leur nouvel employeur, peuvent être sanctionnés voire licenciés pour motif disciplinaire."
-    ],
-    correctIndex: 3,
-    explication: "En cas de transfert conventionnel, le salarié peut refuser la poursuite de son contrat ; il ne s’expose pas à une sanction disciplinaire pour ce motif. L’affirmation est donc inexacte."
-  },
-  {
-    id: 28,
-    question: "Laquelle de ces mesures ne constitue pas une sanction disciplinaire ?",
-    choices: [
-      "la mise à pied conservatoire",
-      "l’avertissement écrit",
-      "la rétrogradation",
-      "la mise à pied disciplinaire"
-    ],
-    correctIndex: 0,
-    explication: "La mise à pied conservatoire est une mesure provisoire visant à écarter le salarié dans l’attente d’une sanction éventuelle ; elle n’est pas, en elle‑même, une sanction disciplinaire."
-  },
-  {
-    id: 29,
-    question: "Laquelle de ces propositions, concernant la convocation à l’entretien préalable en matière disciplinaire (hors licenciement), est inexacte ?",
-    choices: [
-      "La convocation doit préciser au salarié sa faculté d’y être assisté par un membre du personnel.",
-      "La convocation doit lui être adressée dans un délai ‘suffisant’.",
-      "La convocation doit préciser les faits reprochés au salarié.",
-      "La convocation doit préciser l’objet de l’entretien."
-    ],
-    correctIndex: 2,
-    explication: "Pour les sanctions autres que le licenciement, la lettre de convocation n’a pas à détailler les faits reprochés ; cette obligation vaut uniquement en matière de licenciement disciplinaire."
-  },
-  {
-    id: 30,
-    question: "Laquelle de ces propositions est inexacte ?",
-    choices: [
-      "La démission doit être acceptée par l’employeur.",
-      "Le salarié n’a pas à justifier d’un motif légitime pour démissionner.",
-      "L’employeur peut désormais considérer un salarié absent comme démissionnaire si celui-ci ne répond pas, dans les quinze jours, à une mise en demeure de reprendre le travail ou de justifier de son absence.",
-      "La démission doit résulter d’une volonté claire et non équivoque."
-    ],
-    correctIndex: 0,
-    explication: "La démission est un acte unilatéral du salarié ; elle n’a pas à être acceptée par l’employeur, lequel ne peut que l’enregistrer."
-  }
-];
+/** -------------------------------------------------------------------
+ *  ⬇️  Ton tableau de questions — tu peux mixer:
+ *      - correctIndex: number   (mono-réponse)
+ *      - correctIndices: number[] (multi-réponses)
+ * ------------------------------------------------------------------*/
+const QCM_QUESTIONS: LegacyQuestion[] = [
 
-const QCM_QUESTIONS_2024: Question[] = [
   {
     "id": 1,
-    "question": "Le « bloc de constitutionnalité » comprend…",
+    "question": "Objectif principal de l’EC ABD",
     "choices": [
-      "le préambule de la Constitution de 1946",
-      "les décrets pris après avis du Conseil d’État",
-      "les arrêtés ministériels",
-      "les traités internationaux ratifiés par la France"
+      "Comprendre l’architecture d’un SGBD et son implantation",
+      "Apprendre exclusivement le SQL avancé sans administration",
+      "Se limiter aux sauvegardes applicatives",
+      "Étudier uniquement les systèmes d’exploitation"
     ],
-    "correctIndex": 0,
-    "explication": "Le préambule de 1946 fait partie des textes à valeur constitutionnelle reconnus par le Conseil constitutionnel ; les autres actes ont un rang inférieur."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Comprendre l’architecture d’un SGBD et son implantation."
   },
   {
     "id": 2,
-    "question": "La Convention européenne de sauvegarde des droits de l’Homme…",
+    "question": "Double casquette du DBA",
     "choices": [
-      "est issue du Conseil de l’Europe",
-      "a été adoptée à l’OIT",
-      "a été adoptée par l’Assemblée nationale",
-      "est issue de l’Union européenne"
+      "Organisationnelle (modèle/partage des données)",
+      "Technique (mise en œuvre, sécurité, performance)",
+      "Uniquement support helpdesk",
+      "Uniquement achat matériel"
     ],
-    "correctIndex": 0,
-    "explication": "Signée à Rome en 1950 sous l’égide du Conseil de l’Europe, organisation distincte de l’UE."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Organisationnelle (modèle/partage des données) / Technique (mise en œuvre, sécurité, performance)."
   },
   {
     "id": 3,
-    "question": "Le test professionnel…",
+    "question": "Responsabilité du DBA sur les privilèges",
     "choices": [
-      "est obligatoirement rémunéré",
-      "est identique à la période d’essai",
-      "est réalisé avant la conclusion du contrat de travail",
-      "peut durer jusqu’à un mois"
+      "Attribuer/retirer des privilèges d’accès",
+      "Créer automatiquement un index par colonne",
+      "Configurer les routeurs réseau",
+      "Écrire toutes les applications clientes"
     ],
-    "correctIndex": 2,
-    "explication": "C’est une mise en situation qui se déroule avant toute embauche ; il n’y a donc pas encore de contrat."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Attribuer/retirer des privilèges d’accès."
   },
   {
     "id": 4,
-    "question": "Le conseil de prud’hommes…",
+    "question": "Performance : idée clé",
     "choices": [
-      "rend des jugements insusceptibles d’appel",
-      "est composé de magistrats professionnels",
-      "tranche les litiges entre commerçants",
-      "est composé de représentants des salariés et des employeurs"
+      "Adapter l’implantation aux usages réels",
+      "Désactiver systématiquement les contraintes",
+      "Utiliser un seul gros fichier pour tout",
+      "Limiter chaque table à 1 Mo"
     ],
-    "correctIndex": 3,
-    "explication": "Juridiction paritaire : conseillers prud’homaux élus parmi salariés et employeurs, non des magistrats professionnels."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Adapter l’implantation aux usages réels."
   },
   {
     "id": 5,
-    "question": "Les arrêtés…",
+    "question": "Outils d’échange/migration cités",
     "choices": [
-      "sont des décisions de justice",
-      "permettent de stopper l’examen d’un projet de loi",
-      "sont des actes réglementaires votés par le Parlement",
-      "sont des actes réglementaires pris par une autorité administrative"
+      "SQL*Loader",
+      "SQLPLUS",
+      "tcpdump",
+      "Wireshark"
     ],
-    "correctIndex": 3,
-    "explication": "Un arrêté est adopté par une autorité administrative (ministre, préfet, maire, etc.), jamais par le Parlement."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : SQL*Loader / SQLPLUS."
   },
   {
     "id": 6,
-    "question": "Quel type de contrat de travail n’est pas obligatoirement écrit ?",
+    "question": "Bonnes pratiques d’accès",
     "choices": [
-      "Le contrat à temps partiel",
-      "Le contrat d’apprentissage",
-      "Le contrat à durée déterminée",
-      "Le contrat à durée indéterminée à temps plein"
+      "Utiliser des comptes nominatifs",
+      "Tracer les connexions/DDL",
+      "Partage massif d’un compte system",
+      "Mot de passe inchangé 5 ans"
     ],
-    "correctIndex": 3,
-    "explication": "Seul le CDI temps plein peut être conclu verbalement ; les trois autres nécessitent un écrit (art. L.1242-12, L.3123-14, L.6222-3)."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Utiliser des comptes nominatifs / Tracer les connexions/DDL."
   },
   {
     "id": 7,
-    "question": "Un accord de branche étendu…",
+    "question": "Objets physiques d’Oracle",
     "choices": [
-      "s’applique à toutes les entreprises du secteur d’activité concerné par l’accord",
-      "n’implique pas un arrêté d’extension du ministère du Travail",
-      "s’applique aux seules entreprises adhérentes des organisations patronales signataires",
-      "s’applique à toutes les entreprises situées en France, quel que soit leur secteur d’activité"
+      "Data files / Redo logs / Control files",
+      "Alert/trace logs",
+      "Schémas, séquences, synonymes (logiques)",
+      "Pages mémoire OS uniquement"
     ],
-    "correctIndex": 0,
-    "explication": "L’arrêté d’extension rend l’accord obligatoire pour toutes les entreprises relevant du champ professionnel visé, qu’elles soient adhérentes ou non."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Data files / Redo logs / Control files / Alert/trace logs."
   },
   {
     "id": 8,
-    "question": "Les directives communautaires…",
+    "question": "À la création d’une table on peut préciser. . .",
     "choices": [
-      "ne fixent jamais de normes relatives au droit du travail",
-      "sont immédiatement applicables dans les États membres",
-      "doivent être transposées dans un délai déterminé dans la réglementation des États membres",
-      "ont la valeur d’un avis non contraignant"
+      "Contraintes (PK, FK, CHECK)",
+      "Paramètres de stockage (PCTFREE. . .)",
+      "Tablespace cible",
+      "Version de l’OS"
     ],
-    "correctIndex": 2,
-    "explication": "Une directive lie les États quant au résultat à atteindre ; elle doit être transposée dans le droit interne avant la date limite."
+    "correctIndices": [
+      0,
+      1,
+      2
+    ],
+    "explication": "Réponses correctes : Contraintes (PK, FK, CHECK) / Paramètres de stockage (PCTFREE. . .) / Tablespace cible."
   },
   {
     "id": 9,
-    "question": "Quel élément ne permet pas de caractériser le lien de subordination juridique ?",
+    "question": "Préfixes de vues dictionnaire",
     "choices": [
-      "L’intégration du salarié à un service organisé",
-      "Le pouvoir de sanctionner le non-respect des directives",
-      "Le pouvoir de donner des directives",
-      "Le pouvoir de contrôler le respect des directives"
+      "USER∗",
+      "ALL∗",
+      "DBA∗",
+      "SYS.H IN T S"
     ],
-    "correctIndex": 0,
-    "explication": "La définition classique (arrêt « Société Générale », 1996) repose sur les pouvoirs de direction, contrôle et sanction ; l’intégration n’est qu’un indice supplémentaire."
+    "correctIndices": [
+      0,
+      1,
+      2
+    ],
+    "explication": "Réponses correctes : USER∗ / ALL∗ / DBA∗."
   },
   {
     "id": 10,
-    "question": "Le recours au télétravail…",
+    "question": "LOGGING / NOLOGGING",
     "choices": [
-      "peut être imposé au salarié en cas de circonstances exceptionnelles",
-      "peut être imposé par l’employeur en toute circonstance",
-      "peut être unilatéralement imposé par le salarié",
-      "peut être refusé par le salarié en toute circonstance"
+      "Contrôle l’inscription des DML dans les journaux",
+      "Active la compression des blocs",
+      "Change la taille de DB_BLOCK_SIZE",
+      "Crée un tablespace"
     ],
-    "correctIndex": 0,
-    "explication": "Art. L.1222-11 : l’employeur peut imposer temporairement le télétravail pour garantir la continuité de l’activité et la protection des salariés (ex. pandémie)."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Contrôle l’inscription des DML dans les journaux."
   },
   {
     "id": 11,
-    "question": "Peut justifier une sanction disciplinaire…",
+    "question": "Data file : propriétés",
     "choices": [
-      "l’exercice d’un droit reconnu au salarié (droit syndical, droit de grève)",
-      "un motif discriminatoire lié aux origines du salarié, à son orientation sexuelle ou à sa religion",
-      "une insuffisance professionnelle ou une insuffisance de résultat",
-      "une exécution volontairement défectueuse du travail"
+      "Appartient à une seule base",
+      "Peut être en AUTOEXTEND",
+      "Partageable en lecture/écriture entre deux bases actives",
+      "Doit faire 2 Mo max"
     ],
-    "correctIndex": 3,
-    "explication": "Seule une faute volontaire engage la responsabilité disciplinaire ; exercer un droit ou être en insuffisance professionnelle ne constitue pas une faute."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Appartient à une seule base / Peut être en AUTOEXTEND."
   },
   {
     "id": 12,
-    "question": "Laquelle de ces propositions est exacte ?",
+    "question": "Vues USER_TABLES / ALL_TABLES / DBA_TABLES",
     "choices": [
-      "Le salarié ne peut pas être sanctionné pour avoir refusé un changement de ses conditions de travail",
-      "Le salarié peut imposer à l’employeur un changement de ses conditions de travail",
-      "Le salarié ne peut pas être sanctionné pour avoir refusé une modification de son contrat de travail",
-      "L’employeur peut imposer au salarié la modification de son contrat de travail"
+      "Portée : propriétaire / accessible / toute la base",
+      "Toutes identiques",
+      "DBA_TABLES liste uniquement les vues",
+      "USER_TABLES couvre toutes les bases"
     ],
-    "correctIndex": 2,
-    "explication": "La modification d’un élément du contrat nécessite l’accord du salarié ; refuser cette modification ne saurait être sanctionné."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Portée : propriétaire / accessible / toute la base."
   },
   {
     "id": 13,
-    "question": "La période d’essai…",
+    "question": "Instance Oracle",
     "choices": [
-      "n’est possible que pour les cadres et ingénieurs",
-      "n’est pas rémunérée",
-      "doit être prévue dans le contrat de travail",
-      "est systématique"
+      "SGA + processus serveurs/arrière-plan",
+      "Nécessaire pour ouvrir une base",
+      "Synonyme de database",
+      "Un simple exécutable client"
     ],
-    "correctIndex": 2,
-    "explication": "Pour être valable, l’essai doit être stipulé dans une clause expresse (art. L.1221-23)."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : SGA + processus serveurs/arrière-plan / Nécessaire pour ouvrir une base."
   },
   {
     "id": 14,
-    "question": "Laquelle de ces sources du droit du travail n’est pas d’origine « jurisprudentielle » ?",
+    "question": "Alert/trace logs servent à. . .",
     "choices": [
-      "Le contrat de travail",
-      "L’engagement unilatéral",
-      "L’accord atypique",
-      "L’usage"
+      "Diagnostiquer les incidents et suivre les événements",
+      "Accélérer les SELECT",
+      "Stocker les données utilisateur",
+      "Sauvegarder les control files"
     ],
-    "correctIndex": 0,
-    "explication": "Le contrat de travail est encadré par le Code du travail ; les trois autres notions ont été construites par la jurisprudence."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Diagnostiquer les incidents et suivre les événements."
   },
   {
     "id": 15,
-    "question": "Les ordonnances…",
+    "question": "Redo log : finalité",
     "choices": [
-      "ne peuvent pas être utilisées par le Gouvernement en matière de droit du travail",
-      "sont utilisées par le Gouvernement pour prescrire des médicaments",
-      "permettent au Parlement de légiférer sur des sujets ne relevant pas de la loi",
-      "permettent au Gouvernement d’adopter directement des normes relevant du pouvoir législatif avec l’autorisation du Parlement"
+      "Rejouer les mises à jour pour reprise après panne",
+      "Optimiser GROUP BY",
+      "Remplacer les sauvegardes",
+      "Gérer l’espace libre des blocs"
     ],
-    "correctIndex": 3,
-    "explication": "Article 38 de la Constitution : après habilitation législative, le Gouvernement peut édicter des mesures de nature législative par ordonnances."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Rejouer les mises à jour pour reprise après panne."
   },
   {
     "id": 16,
-    "question": "Dans les entreprises de plus de 50 salariés…",
+    "question": "Groupes et members de redo",
     "choices": [
-      "l’employeur doit mentionner dans le règlement intérieur la nature et l’échelle des sanctions susceptibles d’être prononcées",
-      "l’absence de règlement intérieur n’empêche pas l’employeur de notifier une mise à pied disciplinaire",
-      "l’absence de règlement intérieur empêche tout licenciement disciplinaire",
-      "l’employeur peut prendre des sanctions non prévues par le règlement intérieur"
+      "Plusieurs members par groupe pour redondance",
+      "Les groupes s’enchaînent circulairement",
+      "Chaque data file est un member",
+      "Les members partagent obligatoirement le même chemin"
     ],
-    "correctIndex": 0,
-    "explication": "Art. L.1321-1 : le règlement doit préciser la nature et l’échelle des sanctions ; à défaut, l’employeur ne peut pas légalement prononcer de sanction autre qu’un avertissement."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Plusieurs members par groupe pour redondance / Les groupes s’enchaînent circulairement."
   },
   {
     "id": 17,
-    "question": "Le droit international public s’intéresse…",
+    "question": "Switch log / checkpoint",
     "choices": [
-      "aux règles définissant les relations entre un État et ses administrations",
-      "aux règles applicables entre personnes privées",
-      "aux règles gouvernant les relations entre États (traités)",
-      "aux règles définissant les infractions et leurs sanctions"
+      "Le checkpoint synchronise les buffers avec les data files",
+      "Le checkpoint réduit la taille du control file",
+      "Le switch supprime les anciens logs",
+      "Le checkpoint arrête l’instance"
     ],
-    "correctIndex": 2,
-    "explication": "Il régit la formation, l’interprétation et l’exécution des traités ainsi que les relations inter-étatiques."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Le checkpoint synchronise les buffers avec les data files."
   },
   {
     "id": 18,
-    "question": "Les « délits » sont jugés par…",
+    "question": "Control file : contient",
     "choices": [
-      "les tribunaux de police",
-      "les cours d’assises",
-      "les cours criminelles départementales",
-      "les tribunaux correctionnels"
+      "Noms/loc. data files et redo logs",
+      "SCN et infos de checkpoint",
+      "Tables utilisateur",
+      "Statistiques de l’optimiseur"
     ],
-    "correctIndex": 3,
-    "explication": "En droit pénal français : contraventions → tribunal de police, délits → tribunal correctionnel, crimes → cour d’assises/cour criminelle."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Noms/loc. data files et redo logs / SCN et infos de checkpoint."
   },
   {
     "id": 19,
-    "question": "L’assemblée générale de l’OIT est composée…",
+    "question": "ARCHIVELOG vs NOARCHIVELOG",
     "choices": [
-      "de délégations tripartites constituées de représentants des États membres, des syndicats de salariés et des organisations patronales",
-      "de représentants des États membres",
-      "de représentants des syndicats de salariés",
-      "de représentants des organisations patronales"
+      "ARCHIVELOG permet la restauration point-à-temps",
+      "NOARCHIVELOG garde plus d’historique",
+      "ARCHIVELOG supprime les redo",
+      "NOARCHIVELOG interdit les sauvegardes"
     ],
-    "correctIndex": 0,
-    "explication": "L’OIT fonctionne sur le principe du tripartisme ; chaque délégation nationale compte 2 délégués gouvernementaux, 1 employeur, 1 travailleur."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : ARCHIVELOG permet la restauration point-à-temps."
   },
   {
     "id": 20,
-    "question": "Une règle de droit…",
+    "question": "AUTOEXTEND impacte. . .",
     "choices": [
-      "ne peut pas être modifiée",
-      "doit être renouvelée tous les cent ans pour continuer à s’appliquer",
-      "ne peut pas être abrogée",
-      "reste applicable tant qu’elle n’est pas abrogée ou modifiée"
+      "La croissance automatique d’un data file",
+      "Uniquement les redo logs",
+      "Uniquement les control files",
+      "Le nombre d’instances"
     ],
-    "correctIndex": 3,
-    "explication": "Le principe de sécurité juridique veut qu’une norme reste en vigueur jusqu’à son abrogation explicite ou implicite."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : La croissance automatique d’un data file."
   },
   {
     "id": 21,
-    "question": "Laquelle de ces propositions est inexacte ?",
+    "question": "ALTER DATABASE ... RESIZE",
     "choices": [
-      "La règle de droit est permanente.",
-      "La règle de droit est obligatoire.",
-      "La règle de droit est inutile.",
-      "La règle de droit est générale."
+      "Modifie la taille d’un data file",
+      "Crée un nouveau tablespace",
+      "Supprime un redo log",
+      "Bascule ARCHIVELOG"
     ],
-    "correctIndex": 2,
-    "explication": "La règle de droit poursuit un objectif d’organisation et de pacification sociales ; elle n’est donc jamais « inutile ». Les trois autres attributs (permanente, obligatoire, générale) sont classiquement admis."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Modifie la taille d’un data file."
   },
   {
     "id": 22,
-    "question": "Constitue une restriction légitime aux libertés individuelles",
+    "question": "Multiplexage des control files",
     "choices": [
-      "le contrôle d’alcoolémie imposé au salarié conduisant son chariot automoteur dans l’entreprise.",
-      "l’obligation du port d’une tenue spécifique pour le salarié en contact avec le public.",
-      "la clause de non-concurrence prévue au contrat de travail d’un commercial.",
-      "l’interdiction faite au salarié d’un garage automobile de conduire un véhicule d’une marque concurrente."
+      "Recommandé pour tolérance aux pannes",
+      "Interdit en production",
+      "Sans effet sur la disponibilité",
+      "Remplace les sauvegardes"
     ],
-    "correctIndex": 1,
-    "explication": "L’exigence de tenue relève d’un motif objectif (image, hygiène, sécurité) et proportionné ; elle est donc licite. Les autres mesures seraient excessives ou sans lien direct avec la tâche."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Recommandé pour tolérance aux pannes."
   },
   {
     "id": 23,
-    "question": "Selon la hiérarchie des normes applicables en France",
+    "question": "Catalogue RMAN",
     "choices": [
-      "la loi a une valeur supérieure aux traités internationaux ratifiés.",
-      "la loi a une valeur supérieure à la Constitution.",
-      "la loi a une valeur supérieure aux directives communautaires.",
-      "la loi a une valeur supérieure aux décrets."
+      "Base externe pour historiser les sauvegardes",
+      "Paramètre de PCTFREE",
+      "Alias de SYS.AUX",
+      "Option réservée aux vues"
     ],
-    "correctIndex": 3,
-    "explication": "Dans l’ordre interne, les règlements (décrets, arrêtés) sont inférieurs à la loi ; inversement, traités et Constitution priment sur la loi."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Base externe pour historiser les sauvegardes."
   },
   {
     "id": 24,
-    "question": "Un accord d’entreprise",
+    "question": "Sauvegarde à chaud requiert. . .",
     "choices": [
-      "peut être unilatéralement imposé par l’employeur.",
-      "peut être conclu avec le délégué d’un syndicat ayant recueilli moins de 10 % des voix aux dernières élections du CSE.",
-      "peut uniquement être conclu dans les entreprises adhérentes à une organisation patronale.",
-      "peut être conclu malgré l’absence de délégué syndical dans l’entreprise."
+      "Mode ARCHIVELOG",
+      "Instance arrêtée",
+      "Suppression des redo",
+      "Control files en lecture seule"
     ],
-    "correctIndex": 3,
-    "explication": "Depuis les ordonnances 2017, les petites entreprises sans délégué syndical peuvent négocier via référendum, élus CSE ou salariés mandatés selon l’effectif."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Mode ARCHIVELOG."
   },
   {
     "id": 25,
-    "question": "Laquelle de ces affirmations est inexacte ?",
+    "question": "Restauration media recovery",
     "choices": [
-      "Un accord collectif peut déroger aux dispositions supplétives du Code du travail.",
-      "Un accord d’entreprise peut déroger à un accord de branche dans un sens moins favorable pour le salarié.",
-      "Certains sujets définis par la loi (bloc 1) ne peuvent être négociés qu’au niveau de la branche.",
-      "Un accord collectif peut déroger à la loi dans un sens plus favorable (hors ordre public absolu)."
+      "Consomme les archives + redo pour remonter",
+      "Supprime l’UNDO",
+      "Réécrit le DBID",
+      "Désactive les contraintes"
     ],
-    "correctIndex": 1,
-    "explication": "Sauf dispositions légales contraires (matières « verrouillées »), un accord de branche prime sur un accord d’entreprise si ce dernier est moins favorable."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Consomme les archives + redo pour remonter."
   },
   {
     "id": 26,
-    "question": "Pour être applicable, un accord de branche…",
+    "question": "Fichiers temporaires",
     "choices": [
-      "doit obligatoirement être plus favorable que la loi.",
-      "doit être validé par le ministère du Travail.",
-      "doit être conclu par des organisations syndicales représentant au moins 30 % des salariés du secteur concerné.",
-      "doit obligatoirement être conclu par plusieurs organisations patronales représentatives."
+      "Utilisés pour tri/agrégats/bitmap join",
+      "Contiennent les control files",
+      "Stockent les sauvegardes RMAN",
+      "Sont persistants dans le control file"
     ],
-    "correctIndex": 2,
-    "explication": "Le critère décisif est la signature, côté salariés, d’OS représentatives totalisant ≥ 30 % des suffrages, sauf opposition majoritaire."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Utilisés pour tri/agrégats/bitmap join."
   },
   {
     "id": 27,
-    "question": "Le Conseil constitutionnel",
+    "question": "DBID",
     "choices": [
-      "rend uniquement des avis sur la conformité des lois à la Constitution.",
-      "est composé de 20 membres élus.",
-      "peut se prononcer sur la constitutionnalité d’une loi contestée par un justiciable (QPC).",
-      "ne peut être saisi que par le Président de la République."
+      "Identifiant unique de la base",
+      "Nom d’instance",
+      "Nom de schéma",
+      "Paramètre mémoire"
     ],
-    "correctIndex": 2,
-    "explication": "Depuis 2010, la question prioritaire de constitutionnalité (QPC) permet à tout justiciable, via les juridictions ordinaires, de le saisir."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Identifiant unique de la base."
   },
   {
     "id": 28,
-    "question": "Ne constitue pas un droit ou une liberté fondamentale",
+    "question": "Paramètre DB_BLOCK_SIZE",
     "choices": [
-      "Le respect de la vie personnelle.",
-      "Le droit de discuter pendant les cours.",
-      "Le droit d’agir en justice.",
-      "L’exercice du droit syndical."
+      "Taille des blocs logiques Oracle",
+      "Taille des pages OS",
+      "Taille des clusters index",
+      "Nombre de freelists"
     ],
-    "correctIndex": 1,
-    "explication": "Le droit de bavarder n’est pas protégé au rang de liberté fondamentale, contrairement aux trois autres prérogatives reconnues."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Taille des blocs logiques Oracle."
   },
   {
     "id": 29,
-    "question": "Laquelle de ces conditions n’est pas nécessaire pour caractériser l’usage ?",
+    "question": "Choisir la taille de bloc élevée",
     "choices": [
-      "La fixité.",
-      "La contractualisation.",
-      "La constance.",
-      "La généralité."
+      "Utile pour scans séquentiels volumineux",
+      "Peut dégrader l’accès aléatoire OLTP",
+      "Toujours préférable",
+      "Sans impact mémoire"
     ],
-    "correctIndex": 1,
-    "explication": "Un usage est né d’une pratique fixée, constante et générale ; il n’a pas besoin d’être formalisé par contrat (« contractualisation »)."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Utile pour scans séquentiels volumineux / Peut dégrader l’accès aléatoire OLTP."
   },
   {
     "id": 30,
-    "question": "Une sanction disciplinaire…",
+    "question": "Tablespace : définition",
     "choices": [
-      "doit obligatoirement être notifiée par écrit et indiquer les faits reprochés au salarié.",
-      "doit être notifiée au salarié dans les six mois suivant l’entretien préalable.",
-      "peut être justifiée par des faits connus de l’employeur depuis moins d’un an.",
-      "ne peut pas être annulée par le conseil de prud’hommes."
+      "Unité logique regroupant des segments",
+      "Un fichier physique",
+      "Une table",
+      "Un index cluster"
     ],
-    "correctIndex": 0,
-    "explication": "L’article L.1333-1 impose une notification écrite motivée ; à défaut, la sanction est nulle."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Unité logique regroupant des segments."
   },
   {
     "id": 31,
-    "question": "Laquelle de ces propositions est inexacte ?",
+    "question": "SYSTEM/SYSAUX",
     "choices": [
-      "Certaines professions, listées par le Code du travail, font l’objet d’une présomption irréfragable de salariat.",
-      "Le statut d’« auto-entrepreneur » constitue une présomption simple de non-salariat.",
-      "La dépendance économique existant entre les parties suffit à caractériser le contrat de travail.",
-      "Le juge peut requalifier la relation en contrat de travail s’il constate un lien de subordination."
+      "SYSTEM/SYSAUX hébergent dictionnaire et composants internes",
+      "SYSTEM est optionnel",
+      "SYSAUX peut être supprimé en ligne",
+      "SYSTEM peut être OFFLINE"
     ],
-    "correctIndex": 2,
-    "explication": "La dépendance économique n’établit pas, à elle seule, le lien de subordination requis pour le contrat de travail."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : SYSTEM/SYSAUX hébergent dictionnaire et composants internes."
   },
   {
     "id": 32,
-    "question": "Laquelle de ces affirmations est inexacte ?",
+    "question": "QUOTA sur tablespace",
     "choices": [
-      "Les accords de branche prévalent sur les accords d’entreprise pour certains sujets listés par la loi.",
-      "Les accords collectifs peuvent déroger aux dispositions supplétives du Code du travail.",
-      "Les accords collectifs ne peuvent jamais déroger aux dispositions du Code du travail.",
-      "Sur les autres sujets, les accords d’entreprise priment même s’ils sont moins favorables."
+      "Limite l’espace qu’un utilisateur peut consommer",
+      "Limite le nombre d’objets",
+      "Active TDE",
+      "Force la compression"
     ],
-    "correctIndex": 2,
-    "explication": "Depuis la loi 2016-1088, la dérogation est possible hors ordre public absolu ou matières verrouillées ; l’assertion est donc fausse."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Limite l’espace qu’un utilisateur peut consommer."
   },
   {
     "id": 33,
-    "question": "Laquelle de ces propositions est inexacte ?",
+    "question": "Tablespace SYSTEM",
     "choices": [
-      "Les accords collectifs peuvent être négociés au niveau national et interprofessionnel.",
-      "Les accords collectifs doivent être validés par le ministère du Travail.",
-      "Les accords collectifs sont des normes spécifiques au droit du travail.",
-      "Les conventions collectives peuvent être négociées au niveau d’un secteur d’activité."
+      "Ne peut jamais être OFFLINE",
+      "Peut être lu/écrit par un autre DBID",
+      "Réservé aux index uniquement",
+      "Optionnel"
     ],
-    "correctIndex": 1,
-    "explication": "Une convention ou un accord collectif prend effet sans validation ministérielle ; seul l’arrêté d’extension relève de l’administration."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Ne peut jamais être OFFLINE."
   },
   {
     "id": 34,
-    "question": "Laquelle de ces propositions est inexacte ?",
+    "question": "TEMP vs UNDO",
     "choices": [
-      "Une modification de la rémunération constitue nécessairement une modification du contrat de travail.",
-      "Un changement de lieu de travail constitue nécessairement une modification du contrat de travail.",
-      "Un salarié ne peut pas être sanctionné pour avoir refusé une modification de son contrat.",
-      "Un salarié peut être sanctionné pour avoir refusé un changement de ses conditions de travail."
+      "TEMP pour opérations transitoires (tri, hash)",
+      "UNDO pour versions avant modification",
+      "TEMP stocke les redo",
+      "UNDO remplace RMAN"
     ],
-    "correctIndex": 1,
-    "explication": "Le changement de lieu est, en principe, un simple changement des conditions de travail dès lors qu’il reste dans le même secteur géographique."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : TEMP pour opérations transitoires (tri, hash) / UNDO pour versions avant modification."
   },
   {
     "id": 35,
-    "question": "La rupture du contrat de travail pendant la période d’essai…",
+    "question": "Segment de données",
     "choices": [
-      "ne doit pas reposer sur un motif discriminatoire.",
-      "implique la convocation du salarié à un entretien préalable.",
-      "implique toujours un délai de prévenance d’une semaine.",
-      "ne peut pas être à l’initiative du salarié."
+      "Groupe d’extents alloués à une table",
+      "Alias de data file",
+      "Processus background",
+      "Répertoire OS"
     ],
-    "correctIndex": 0,
-    "explication": "La liberté de rompre l’essai est encadrée : elle ne doit pas être abusive ou discriminatoire ; entretien préalable et délai varient selon l’ancienneté."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Groupe d’extents alloués à une table."
   },
   {
     "id": 36,
-    "question": "Le Code du travail limite la période d’essai initiale (hors renouvellement) pour les cadres à…",
+    "question": "Segments : types",
     "choices": [
-      "un mois",
-      "quatre mois",
-      "deux mois",
-      "trois mois"
+      "Données",
+      "Index",
+      "Temporaire",
+      "Réseau"
     ],
-    "correctIndex": 1,
-    "explication": "Art. L.1221-19 : quatre mois maximum pour les cadres, renouvelable une fois si prévu."
+    "correctIndices": [
+      0,
+      1,
+      2
+    ],
+    "explication": "Réponses correctes : Données / Index / Temporaire."
   },
   {
     "id": 37,
-    "question": "Laquelle de ces propositions est inexacte ?",
+    "question": "Extent (extension)",
     "choices": [
-      "L’OIT est le lieu de négociation de traités internationaux portant sur le droit du travail.",
-      "Le but de l’OIT est de favoriser le « libre-échange » en harmonisant les droits de douane.",
-      "L’OIT est une agence spécialisée de l’ONU.",
-      "L’assemblée de l’OIT est dite « tripartite »."
+      "Allocation contiguë de blocs",
+      "Plus petite unité logique d’E/S",
+      "Unité de redo",
+      "Identique à une page OS"
     ],
-    "correctIndex": 1,
-    "explication": "L’objectif de l’OIT est d’améliorer la justice sociale et les conditions de travail, non de promouvoir le libre-échange douanier."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Allocation contiguë de blocs."
   },
   {
     "id": 38,
-    "question": "Le Conseil constitutionnel…",
+    "question": "PCTFREE",
     "choices": [
-      "contrôle la conformité des lois aux normes constitutionnelles.",
-      "est composé de neuf membres nommés pour 9 ans et renouvelés par tiers.",
-      "est le garant de la régularité des grandes élections.",
-      "ne peut plus se prononcer sur la constitutionnalité d’une loi après sa promulgation."
+      "Pourcentage réservé aux mises à jour dans un bloc",
+      "Seuil de réutilisation pour insertions",
+      "Taux d’augmentation des extents",
+      "Slots de transactions"
     ],
-    "correctIndex": 0,
-    "explication": "Sa mission principale est le contrôle de constitutionnalité, exercé a priori et, depuis 2009, a posteriori via la QPC."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Pourcentage réservé aux mises à jour dans un bloc."
   },
   {
     "id": 39,
-    "question": "Laquelle de ces propositions est inexacte ?",
+    "question": "PCTUSED",
     "choices": [
-      "Le renouvellement de la période d’essai n’est pas possible si le contrat ne l’a pas prévu.",
-      "Le renouvellement de la période d’essai nécessite l’accord du salarié.",
-      "Le renouvellement doit être prévu par l’accord de branche.",
-      "La période d’essai peut être renouvelée trois fois."
+      "Seuil en-deçà duquel un bloc redevient insérable",
+      "Réserve de mise à jour",
+      "Augmente NEXT",
+      "Taille de bloc"
     ],
-    "correctIndex": 3,
-    "explication": "Le Code prévoit au maximum un seul renouvellement ; tripler l’essai est illégal."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Seuil en-deçà duquel un bloc redevient insérable."
   },
   {
     "id": 40,
-    "question": "Selon le Conseil constitutionnel, les traités internationaux ont une valeur…",
+    "question": "INITRANS",
     "choices": [
-      "inférieure aux décrets.",
-      "inférieure aux lois.",
-      "inférieure à la Constitution.",
-      "inférieure aux arrêtés."
+      "Nombre de slots de transactions réservés dans l’en-tête",
+      "Nombre maximal de sessions",
+      "Taille des redo logs",
+      "Nombre de freelists"
     ],
-    "correctIndex": 2,
-    "explication": "Décision IVG (1975) : les traités ratifiés sont supérieurs aux lois mais demeurent hiérarchiquement sous la Constitution."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Nombre de slots de transactions réservés dans l’en-tête."
   },
   {
     "id": 41,
-    "question": "La requalification d’un CDD en CDI peut être prononcée par le juge lorsque…",
+    "question": "FREELISTS",
     "choices": [
-      "le motif de recours au CDD n’est pas précisé ou n’est pas réel et sérieux",
-      "le salaire est inférieur au SMIC",
-      "le CDD a été signé numériquement",
-      "il s’agit d’un contrat saisonnier"
+      "Listes de blocs libres par segment",
+      "Paramètre mémoire SGA",
+      "Table virtuelle",
+      "Alias de TEMP"
     ],
-    "correctIndex": 0,
-    "explication": "L’article L.1245-1 prévoit la requalification si le CDD ne comporte pas l’énoncé d’un motif valable ou si celui-ci est fictif ; la signature électronique et la nature saisonnière, en revanche, sont licites."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Listes de blocs libres par segment."
   },
   {
     "id": 42,
-    "question": "Dans les entreprises de plus de 50 salariés, le règlement intérieur doit impérativement…",
+    "question": "PCTINCREASE",
     "choices": [
-      "fixer les règles relatives à la santé et la sécurité",
-      "déterminer le montant des primes d’ancienneté",
-      "fixer le nombre de congés payés",
-      "définir la grille des salaires"
+      "Taux d’augmentation des extents NEXT successifs",
+      "Espace libre par bloc",
+      "Ratio d’utilisation buffer cache",
+      "Facteur de B-tree"
     ],
-    "correctIndex": 0,
-    "explication": "Art. L.1321-1 : le règlement intérieur traite a minima de la santé/sécurité, de la discipline et des droits de la défense ; les primes et salaires relèvent d’autres textes."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Taux d’augmentation des extents NEXT successifs."
   },
   {
     "id": 43,
-    "question": "Constitue une situation de harcèlement moral…",
+    "question": "Chaînage de lignes (row chaining)",
     "choices": [
-      "un rappel à l’ordre ponctuel pour non-respect d’une procédure",
-      "la mise en œuvre d’un PSE (plan social) avec mesures d’accompagnement",
-      "une critique professionnelle exprimée une seule fois",
-      "des agissements répétés ayant pour effet une dégradation des conditions de travail"
+      "Survient quand une ligne ne tient pas dans un bloc",
+      "Optimise les accès",
+      "Réduit l’I/O",
+      "Sans lien avec PCTFREE"
     ],
-    "correctIndex": 3,
-    "explication": "Le harcèlement moral suppose des agissements répétés entraînant une atteinte aux droits ou à la santé du salarié (art. L.1152-1)."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Survient quand une ligne ne tient pas dans un bloc."
   },
   {
     "id": 44,
-    "question": "Une clause de non-concurrence est valable si…",
+    "question": "Fragmentation",
     "choices": [
-      "elle s’applique sans limite de durée",
-      "elle ne prévoit aucune contrepartie financière",
-      "elle est proportionnée, limitée dans le temps et l’espace et assortie d’une contrepartie financière",
-      "elle est imposée unilatéralement après la signature du contrat"
+      "Peut augmenter le nombre d’extents et l’I/O",
+      "Sans effet sur la performance",
+      "Toujours souhaitable",
+      "Supprime les checkpoints"
     ],
-    "correctIndex": 2,
-    "explication": "Depuis la jurisprudence « Soc. 10 juil. 2002, n° 00-45135 », la clause doit être nécessaire à la protection des intérêts légitimes de l’entreprise, limitée et indemnisée."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Peut augmenter le nombre d’extents et l’I/O."
   },
   {
     "id": 45,
-    "question": "Les heures supplémentaires accomplies au-delà de la 35ᵉ heure hebdomadaire…",
+    "question": "Block header contient. . .",
     "choices": [
-      "ouvrent droit à une majoration minimale de 25 % pour les 8 premières heures",
-      "n’ouvrent droit à aucune majoration en présence d’un accord d’entreprise",
-      "doivent obligatoirement être récupérées sous forme de repos compensateur intégral",
-      "sont interdites dans les entreprises de moins de 20 salariés"
+      "Infos d’en-tête, ITL (transactions), répertoire des lignes",
+      "Espace libre et données",
+      "Control file",
+      "Redo"
     ],
-    "correctIndex": 0,
-    "explication": "À défaut d’accord, les huit premières heures supplémentaires (36ᵉ à 43ᵉ) sont majorées de 25 % (art. L.3121-36)."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Infos d’en-tête, ITL (transactions), répertoire des lignes / Espace libre et données."
   },
   {
     "id": 46,
-    "question": "Après signature d’une rupture conventionnelle, chacune des parties dispose d’un droit de rétractation de…",
+    "question": "Heap-organized table",
     "choices": [
-      "3 jours calendaires",
-      "5 jours ouvrables",
-      "7 jours calendaires",
-      "15 jours ouvrables"
+      "Organisation par emplacement libre sans tri",
+      "Toujours triée par PK",
+      "Toujours en cluster",
+      "Toujours compressée"
     ],
-    "correctIndex": 3,
-    "explication": "Art. L.1237-13 : délai de rétractation de 15 jours calendaires à compter de la signature (le texte parle de « jours calendaires », pas ouvrables)."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Organisation par emplacement libre sans tri."
   },
   {
     "id": 47,
-    "question": "Le licenciement économique collectif d’au moins 10 salariés sur 30 jours…",
+    "question": "Index-organized table (IOT)",
     "choices": [
-      "exige toujours une autorisation administrative préalable",
-      "ne nécessite pas de plan de sauvegarde de l’emploi (PSE) si l’entreprise compte moins de 300 salariés",
-      "nécessite un plan de sauvegarde de l’emploi lorsque l’entreprise a au moins 50 salariés",
-      "peut être décidé sans consultation du CSE"
+      "Données stockées dans la structure d’index",
+      "Clé primaire devenue clé d’accès physique",
+      "Toujours plus rapide en écriture",
+      "Interdit les PK"
     ],
-    "correctIndex": 2,
-    "explication": "Art. L.1233-61 : PSE obligatoire dès 10 licenciements sur 30 jours dans une entreprise d’au moins 50 salariés."
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Données stockées dans la structure d’index / Clé primaire devenue clé d’accès physique."
   },
   {
     "id": 48,
-    "question": "Un licenciement disciplinaire doit être notifié au salarié…",
+    "question": "Cluster (hash ou index)",
     "choices": [
-      "dans le délai maximal de 1 mois après l’entretien préalable",
-      "dans le délai maximal de 2 mois après connaissance des faits fautifs",
-      "par lettre recommandée motivée",
-      "sans mention obligatoire des griefs"
+      "Regroupe physiquement des lignes de plusieurs tables liées",
+      "Synonyme de tablespace",
+      "Remplace les index",
+      "Réservé aux vues"
     ],
-    "correctIndex": 2,
-    "explication": "Art. L.1232-6 : notification par LRAR énonçant précisément les motifs ; délai général de 1 mois concerne la sanction mais la réponse exacte reste la forme."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Regroupe physiquement des lignes de plusieurs tables liées."
   },
   {
     "id": 49,
-    "question": "Le secret médical…",
+    "question": "Compression de table",
     "choices": [
-      "est levé par la seule demande écrite de l’employeur",
-      "incorpore les informations détenues par le médecin du travail",
-      "ne couvre pas les informations communiquées à la médecine du travail",
-      "n’est pas applicable dans l’entreprise"
+      "Réduit l’espace et peut réduire l’I/O séquentielle",
+      "Toujours idéale en OLTP très écrivant",
+      "Interdit les index",
+      "Obligatoire en TEMP"
     ],
-    "correctIndex": 1,
-    "explication": "Le médecin du travail est tenu au secret professionnel (art. R.4623-12) ; il ne peut transmettre que des conclusions d’aptitude, pas le diagnostic."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Réduit l’espace et peut réduire l’I/O séquentielle."
   },
   {
     "id": 50,
-    "question": "Laquelle de ces juridictions est composée de juges non professionnels ?",
+    "question": "Storage parameters (INITIAL/NEXT)",
     "choices": [
-      "Le tribunal judiciaire",
-      "La cour criminelle départementale",
-      "Le conseil de prud’hommes",
-      "Le tribunal administratif"
+      "Pilotent la taille des premiers extents",
+      "Changés par DB_BLOCK_SIZE",
+      "Contrôlent la rétention UNDO",
+      "Agissent sur redo size"
     ],
-    "correctIndex": 2,
-    "explication": "Le conseil de prud’hommes est une juridiction paritaire où siègent des conseillers élus parmi les salariés et employeurs ; les autres formations comprennent des magistrats."
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Pilotent la taille des premiers extents."
+  },
+  {
+    "id": 51,
+    "question": "Tables temporaires globales (GTT)",
+    "choices": [
+      "Données visibles par session, vides au commit/session selon mode",
+      "Stockent durablement les archives",
+      "Partagées entre bases",
+      "Incompatibles avec index"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Données visibles par session, vides au commit/session selon mode."
+  },
+  {
+    "id": 52,
+    "question": "Séquences",
+    "choices": [
+      "Génèrent des numéros (cache, cycle) pour PK, etc",
+      "Stockent des lignes",
+      "Remplacent les redo",
+      "Nécessitent TEMP"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Génèrent des numéros (cache, cycle) pour PK, etc."
+  },
+  {
+    "id": 53,
+    "question": "Synonymes",
+    "choices": [
+      "Alias d’objets pour simplifier les noms",
+      "Stockent les permissions",
+      "Remplacent les vues",
+      "Sont des segments physiques"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Alias d’objets pour simplifier les noms."
+  },
+  {
+    "id": 54,
+    "question": "Contraintes CHECK",
+    "choices": [
+      "Validations logiques sur colonnes/lignes",
+      "Journalisation redo",
+      "Gestion de quota",
+      "Allocation d’extents"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Validations logiques sur colonnes/lignes."
+  },
+  {
+    "id": 55,
+    "question": "Contraintes FK : index ?",
+    "choices": [
+      "Un index sur la FK est recommandé pour DELETE parent",
+      "Oracle crée toujours l’index automatiquement",
+      "Interdit les jointures",
+      "Supprime la nécessité d’UNDO"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Un index sur la FK est recommandé pour DELETE parent."
+  },
+  {
+    "id": 56,
+    "question": "Statistiques d’optimiseur",
+    "choices": [
+      "Guident le plan d’exécution (CBO)",
+      "Sans effet sur l’optimiseur",
+      "Remplacent les index",
+      "Stockées dans control file"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Guident le plan d’exécution (CBO)."
+  },
+  {
+    "id": 57,
+    "question": "Gather stats : granularité",
+    "choices": [
+      "Table/partition/colonne",
+      "Système (dict.)",
+      "Uniquement base entière",
+      "Uniquement colonne"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Table/partition/colonne / Système (dict.)."
+  },
+  {
+    "id": 58,
+    "question": "Histograms",
+    "choices": [
+      "Améliorent les estimations pour colonnes non uniformes",
+      "Suppriment la cardinalité",
+      "Remplacent les index bitmap",
+      "S’appliquent aux data files"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Améliorent les estimations pour colonnes non uniformes."
+  },
+  {
+    "id": 59,
+    "question": "Bind peeking",
+    "choices": [
+      "L’optimiseur échantillonne une valeur de bind à la 1ère exécution",
+      "Désactive les plans",
+      "Supprime les statistiques",
+      "Évite le hard parse"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : L’optimiseur échantillonne une valeur de bind à la 1ère exécution."
+  },
+  {
+    "id": 60,
+    "question": "Plan baselines",
+    "choices": [
+      "Capturent/forcent des plans stables",
+      "Interdisent le SQL",
+      "Remplacent les index",
+      "Égal à UNDO"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Capturent/forcent des plans stables."
+  },
+  {
+    "id": 61,
+    "question": "Materialized views : usage",
+    "choices": [
+      "Stockent le résultat d’une requête",
+      "Permettent des query rewrite",
+      "Toujours rafraîchies à chaque SELECT",
+      "Réservées à TEMP"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Stockent le résultat d’une requête / Permettent des query rewrite."
+  },
+  {
+    "id": 62,
+    "question": "Materialized view log",
+    "choices": [
+      "Journal de changements pour refresh incrémental",
+      "Fichier redo",
+      "Control file",
+      "Paramètre SGA"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Journal de changements pour refresh incrémental."
+  },
+  {
+    "id": 63,
+    "question": "Bitmap join index",
+    "choices": [
+      "Optimise jointures dimension-fait (faible cardinalité)",
+      "Toujours mieux que B-tree en OLTP",
+      "Interdit partitionnement",
+      "Réservé aux vues"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Optimise jointures dimension-fait (faible cardinalité)."
+  },
+  {
+    "id": 64,
+    "question": "Function-based index",
+    "choices": [
+      "Indexe l’expression calculée",
+      "Interdit WHERE",
+      "Réservé aux PK",
+      "Équivaut à bitmap"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Indexe l’expression calculée."
+  },
+  {
+    "id": 65,
+    "question": "Invisible index",
+    "choices": [
+      "Créé mais ignoré par l’optimiseur (sauf hint)",
+      "Supprime les données",
+      "Obligatoire pour FK",
+      "Réservé à TEMP"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Créé mais ignoré par l’optimiseur (sauf hint)."
+  },
+  {
+    "id": 66,
+    "question": "Parallel query (PQ)",
+    "choices": [
+      "Divise le travail de scan/tri entre serveurs parallèles",
+      "Supprime les redo",
+      "Interdit les indexes",
+      "Exige NOARCHIVELOG"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Divise le travail de scan/tri entre serveurs parallèles."
+  },
+  {
+    "id": 67,
+    "question": "Direct path insert",
+    "choices": [
+      "Remplit des blocs au-delà de HWM, souvent NOLOGGING possible",
+      "Toujours plus lent",
+      "Interdit les contraintes",
+      "Supprime UNDO"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Remplit des blocs au-delà de HWM, souvent NOLOGGING possible."
+  },
+  {
+    "id": 68,
+    "question": "External tables",
+    "choices": [
+      "Accès SQL sur fichiers plats via drivers",
+      "Stockent dans SYSTEM",
+      "Remplacent SQL*Loader",
+      "Sans métadonnées"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Accès SQL sur fichiers plats via drivers."
+  },
+  {
+    "id": 69,
+    "question": "Data Pump (expdp/impdp)",
+    "choices": [
+      "Export/import logique à haute performance",
+      "Filtrage schéma/table",
+      "Remplace RMAN physique",
+      "Exige arrêt base"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Export/import logique à haute performance / Filtrage schéma/table."
+  },
+  {
+    "id": 70,
+    "question": "Transportable tablespaces",
+    "choices": [
+      "Déplacent des jeux de tablespaces entre bases compatibles",
+      "Équivalent à expdp full",
+      "Suppriment les SCN",
+      "Sans métadonnées"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Déplacent des jeux de tablespaces entre bases compatibles."
+  },
+  {
+    "id": 71,
+    "question": "TDE (Transparent Data Encryption)",
+    "choices": [
+      "Chiffre données au repos (tablespaces/colonnes)",
+      "Supprime redo/undo",
+      "Chiffre le réseau SQL*Net",
+      "Remplace les privilèges"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Chiffre données au repos (tablespaces/colonnes)."
+  },
+  {
+    "id": 72,
+    "question": "ACID : propriété “C” (Consistency)",
+    "choices": [
+      "Préserve l’intégrité avant/après transactions",
+      "Assure la concurrence",
+      "Assure la durabilité",
+      "Assure l’atomicité"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Préserve l’intégrité avant/après transactions."
+  },
+  {
+    "id": 73,
+    "question": "Isolation",
+    "choices": [
+      "Empêche les lectures de données non validées",
+      "Efface les redo",
+      "Désactive UNDO",
+      "Interdit SELECT"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Empêche les lectures de données non validées."
+  },
+  {
+    "id": 74,
+    "question": "COMMIT",
+    "choices": [
+      "Rend durables les changements d’une transaction",
+      "Annule la transaction",
+      "Crée un index",
+      "Vide TEMP"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Rend durables les changements d’une transaction."
+  },
+  {
+    "id": 75,
+    "question": "ROLLBACK",
+    "choices": [
+      "Annule une transaction non validée",
+      "Valide une transaction",
+      "Crée un tablespace",
+      "Change DBID"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Annule une transaction non validée."
+  },
+  {
+    "id": 76,
+    "question": "SAVEPOINT",
+    "choices": [
+      "Point de retour partiel dans une transaction",
+      "Synonyme de COMMIT",
+      "Vide UNDO",
+      "Crée des archives"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Point de retour partiel dans une transaction."
+  },
+  {
+    "id": 77,
+    "question": "Lecture cohérente (consistent read)",
+    "choices": [
+      "Utilise UNDO pour reconstruire une ancienne version",
+      "Lit toujours la dernière version committée",
+      "N’emploie pas UNDO",
+      "Désactive redo"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Utilise UNDO pour reconstruire une ancienne version."
+  },
+  {
+    "id": 78,
+    "question": "UNDO tablespace",
+    "choices": [
+      "Stocke les valeurs « avant » modification",
+      "Stocke les résultats de SELECT",
+      "Control file",
+      "TEMP"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Stocke les valeurs « avant » modification."
+  },
+  {
+    "id": 79,
+    "question": "undoretentiontropcourtßORA − 01555",
+    "choices": [
+      "Snapshots trop anciens pendant de longues requêtes",
+      "Fichier redo trop petit",
+      "SCN invalide",
+      "Manque d’index"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Snapshots trop anciens pendant de longues requêtes."
+  },
+  {
+    "id": 80,
+    "question": "Read only tablespace",
+    "choices": [
+      "Protège des DML, utile pour archives",
+      "Interdit SELECT",
+      "Supprime redo",
+      "Chiffre le réseau"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Protège des DML, utile pour archives."
+  },
+  {
+    "id": 81,
+    "question": "Deadlock",
+    "choices": [
+      "Attente circulaire de verrous, détectée et résolue",
+      "Toujours causé par ORA-01555",
+      "Supprimé par NOLOGGING",
+      "Impossible en Oracle"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Attente circulaire de verrous, détectée et résolue."
+  },
+  {
+    "id": 82,
+    "question": "Niveaux d’isolation courants",
+    "choices": [
+      "READ COMMITTED",
+      "SERIALIZABLE",
+      "DIRTY READ",
+      "NO ISOLATION"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : READ COMMITTED / SERIALIZABLE."
+  },
+  {
+    "id": 83,
+    "question": "Verrous de lignes (ROW locks)",
+    "choices": [
+      "Portent sur les lignes modifiées",
+      "Portent sur tout le tablespace",
+      "Désactivent UNDO",
+      "Sont des redo"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Portent sur les lignes modifiées."
+  },
+  {
+    "id": 84,
+    "question": "ITL (Interested Transaction List)",
+    "choices": [
+      "Emplacements par bloc pour métadonnées de transactions",
+      "Liste d’index invisibles",
+      "Undo retention",
+      "Archive list"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Emplacements par bloc pour métadonnées de transactions."
+  },
+  {
+    "id": 85,
+    "question": "Temp segments et tri",
+    "choices": [
+      "ORDER BY/GROUP BY peuvent consommer TEMP",
+      "Se font toujours en mémoire",
+      "Usent UNDO",
+      "Écrivent control file"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : ORDER BY/GROUP BY peuvent consommer TEMP."
+  },
+  {
+    "id": 86,
+    "question": "SMON/PMON",
+    "choices": [
+      "Processus background de maintenance/récupération et session cleanup",
+      "Clients SQL*Plus",
+      "Optimiseur",
+      "Redo writer"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Processus background de maintenance/récupération et session cleanup."
+  },
+  {
+    "id": 87,
+    "question": "LGWR/DBWR",
+    "choices": [
+      "LGWR écrit redo, DBWR écrit buffers vers data files",
+      "LGWR écrit UNDO",
+      "DBWR écrit control files",
+      "Aucun rapport"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : LGWR écrit redo, DBWR écrit buffers vers data files."
+  },
+  {
+    "id": 88,
+    "question": "Checkpoints fréquents",
+    "choices": [
+      "Réduisent le temps de recovery après crash",
+      "Suppriment redo",
+      "Interdisent ARCHIVELOG",
+      "Inutiles"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Réduisent le temps de recovery après crash."
+  },
+  {
+    "id": 89,
+    "question": "Bénéfices partitionnement",
+    "choices": [
+      "Partition pruning",
+      "Maintenance ciblée (purge/backup)",
+      "Moins d’espace garanti",
+      "Supprime les index"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Partition pruning / Maintenance ciblée (purge/backup)."
+  },
+  {
+    "id": 90,
+    "question": "Clés de partition RANGE",
+    "choices": [
+      "Dates/intervalles numériques",
+      "Ordre aléatoire",
+      "Colonne CLOB uniquement",
+      "Nom d’instance"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Dates/intervalles numériques."
+  },
+  {
+    "id": 91,
+    "question": "Fragmentation horizontale",
+    "choices": [
+      "Découpe par lignes selon condition",
+      "Découpe par colonnes",
+      "Toujours aléatoire",
+      "Synonyme de synonymes"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Découpe par lignes selon condition."
+  },
+  {
+    "id": 92,
+    "question": "Fragmentation verticale",
+    "choices": [
+      "Répartition des colonnes",
+      "Répartition des lignes",
+      "Identique à IOT",
+      "Réservée à TEMP"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Répartition des colonnes."
+  },
+  {
+    "id": 93,
+    "question": "LIST partitioning",
+    "choices": [
+      "Répartit selon valeurs discrètes (ex : région)",
+      "Répartit par hash",
+      "Réservé aux index",
+      "Interdit les PK"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Répartit selon valeurs discrètes (ex : région)."
+  },
+  {
+    "id": 94,
+    "question": "HASH partitioning",
+    "choices": [
+      "Répartit uniformément selon un hash de clé",
+      "Toujours ordonné par date",
+      "Interdit bitmap",
+      "Réservé aux vues"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Répartit uniformément selon un hash de clé."
+  },
+  {
+    "id": 95,
+    "question": "Subpartitionnement composite",
+    "choices": [
+      "Combinaison (ex : RANGE-HASH)",
+      "Interdit",
+      "Équivaut à cluster",
+      "Supprime UNDO"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Combinaison (ex : RANGE-HASH)."
+  },
+  {
+    "id": 96,
+    "question": "Échange de partition (EXCHANGE PARTITION)",
+    "choices": [
+      "Permet de charger/archiver rapidement des données",
+      "Supprime les contraintes",
+      "Change le DBID",
+      "Désactive redo"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Permet de charger/archiver rapidement des données."
+  },
+  {
+    "id": 97,
+    "question": "Local vs Global index",
+    "choices": [
+      "Local index aligné aux partitions → maintenance facilitée",
+      "Global obligatoire",
+      "Local interdit bitmap",
+      "Global sans métadonnées"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Local index aligné aux partitions → maintenance facilitée."
+  },
+  {
+    "id": 98,
+    "question": "Index uniques",
+    "choices": [
+      "Peuvent faire respecter l’unicité",
+      "Toujours créés automatiquement",
+      "Réservés aux PK",
+      "Sans stockage"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Peuvent faire respecter l’unicité."
+  },
+  {
+    "id": 99,
+    "question": "Index composés",
+    "choices": [
+      "Portent sur plusieurs colonnes",
+      "Incompatibles avec WHERE",
+      "Réservés aux vues",
+      "Toujours bitmap"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Portent sur plusieurs colonnes."
+  },
+  {
+    "id": 100,
+    "question": "B-tree vs Bitmap",
+    "choices": [
+      "B-tree : haute cardinalité/OLTP",
+      "Bitmap : faible cardinalité/DW",
+      "Bitmap idéal en écriture intensive OLTP",
+      "B-tree réservé PK"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : B-tree : haute cardinalité/OLTP / Bitmap : faible cardinalité/DW."
+  },
+  {
+    "id": 101,
+    "question": "Quand un index aide peu",
+    "choices": [
+      "Table petite",
+      "Requêtes renvoyant >80",
+      "Colonnes très statiques",
+      "Clauses WHERE très sélectives"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Table petite / Requêtes renvoyant >80."
+  },
+  {
+    "id": 102,
+    "question": "Clustering factor",
+    "choices": [
+      "Mesure l’ordre des données par rapport à l’index",
+      "Taille des data files",
+      "Utilisation redo",
+      "Niveau d’isolation"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Mesure l’ordre des données par rapport à l’index."
+  },
+  {
+    "id": 103,
+    "question": "Maintenance d’index",
+    "choices": [
+      "Coût en INSERT/DELETE/UPDATE",
+      "Gratuit",
+      "Supprime UNDO",
+      "Désactive redo"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Coût en INSERT/DELETE/UPDATE."
+  },
+  {
+    "id": 104,
+    "question": "Index skip scan",
+    "choices": [
+      "Utilise colonnes suivantes même sans première clé",
+      "Réservé bitmap",
+      "Interdit LIKE",
+      "Supprime statistiques"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Utilise colonnes suivantes même sans première clé."
+  },
+  {
+    "id": 105,
+    "question": "Index sur FK",
+    "choices": [
+      "Recommandé pour DELETE/UPDATE parent",
+      "Créé d’office",
+      "Interdit partitionnement",
+      "Obligatoire sur toutes les colonnes"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Recommandé pour DELETE/UPDATE parent."
+  },
+  {
+    "id": 106,
+    "question": "Vue (VIEW)",
+    "choices": [
+      "Table virtuelle (résultat nommé d’une requête)",
+      "Peut servir à contrôler l’accès aux colonnes",
+      "Toujours matérialisée",
+      "Non sécurisable"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Table virtuelle (résultat nommé d’une requête) / Peut servir à contrôler l’accès aux colonnes."
+  },
+  {
+    "id": 107,
+    "question": "Vues pour simplifier",
+    "choices": [
+      "Cachent la complexité des jointures/agrégats",
+      "Remplacent contraintes",
+      "Suppriment index",
+      "Imposent ARCHIVELOG"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Cachent la complexité des jointures/agrégats."
+  },
+  {
+    "id": 108,
+    "question": "WITH READ ONLY",
+    "choices": [
+      "Interdit DML via la vue",
+      "Force matérialisation",
+      "Masque les nombres",
+      "Supprime privilèges"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Interdit DML via la vue."
+  },
+  {
+    "id": 109,
+    "question": "Vues modifiables — restrictions",
+    "choices": [
+      "Pas d’agrégats ni GROUP BY/ORDER BY",
+      "Pas d’opérateurs ensemblistes",
+      "Toujours interdites en jointure",
+      "DISTINCT obligatoire"
+    ],
+    "correctIndices": [
+      0,
+      1
+    ],
+    "explication": "Réponses correctes : Pas d’agrégats ni GROUP BY/ORDER BY / Pas d’opérateurs ensemblistes."
+  },
+  {
+    "id": 110,
+    "question": "Clé préservée (join updateable view)",
+    "choices": [
+      "Vue de jointure modifiable si la clé d’une table est préservée",
+      "Aucune vue de jointure n’est modifiable",
+      "Toute vue ORDER BY est modifiable",
+      "Remplace triggers"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Vue de jointure modifiable si la clé d’une table est préservée."
+  },
+  {
+    "id": 111,
+    "question": "WITH CHECK OPTION",
+    "choices": [
+      "Contraint que les lignes DML respectent le prédicat de la vue",
+      "Rend la vue READ ONLY",
+      "Supprime PK",
+      "Interdit SELECT"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Contraint que les lignes DML respectent le prédicat de la vue."
+  },
+  {
+    "id": 112,
+    "question": "Sécurité par vues",
+    "choices": [
+      "Exposer seulement les colonnes nécessaires",
+      "Supprimer GRANT/REVOKE",
+      "Remplacer TDE",
+      "Désactiver audit"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Exposer seulement les colonnes nécessaires."
+  },
+  {
+    "id": 113,
+    "question": "Materialized view vs view",
+    "choices": [
+      "La matérialisée stocke le résultat et peut se rafraîchir",
+      "La vue simple stocke toujours les lignes",
+      "Les deux identiques",
+      "La matérialisée n’a pas de logs"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : La matérialisée stocke le résultat et peut se rafraîchir."
+  },
+  {
+    "id": 114,
+    "question": "Query rewrite",
+    "choices": [
+      "Permet de rediriger une requête vers une vue matérialisée appropriée",
+      "Réécrit le SQL des utilisateurs en DML",
+      "Change DBID",
+      "Supprime UNDO"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Permet de rediriger une requête vers une vue matérialisée appropriée."
+  },
+  {
+    "id": 115,
+    "question": "Synonymes privés vs publics",
+    "choices": [
+      "Publics visibles par tous, privés par le schéma",
+      "Privés visibles par tous",
+      "Publics limités au schéma",
+      "Aucun ne référence d’objet"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Publics visibles par tous, privés par le schéma."
+  },
+  {
+    "id": 116,
+    "question": "Vue imbriquée (vue de vue)",
+    "choices": [
+      "Possible ; la maintenance doit considérer les dépendances",
+      "Interdit en Oracle",
+      "Supprime les privilèges",
+      "Change la taille de bloc"
+    ],
+    "correctIndices": [
+      0
+    ],
+    "explication": "Réponse correcte : Possible ; la maintenance doit considérer les dépendances."
   }
-]
+];
 
-// Cercle dynamique pour stats
-function StatCircle({ value, max, color, label, labelColor }: { value: number, max: number, color: string, label: string, labelColor: string }) {
-  const radius = 28;
-  const stroke = 5;
-  const normalizedRadius = radius - stroke / 2;
-  const circumference = normalizedRadius * 2 * Math.PI;
-  const percent = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-  const strokeDashoffset = circumference * (1 - percent);
+/** ---- Normalisation : accepte correctIndex OU correctIndices ---- **/
+const QUESTIONS: QuestionNormalized[] = QCM_QUESTIONS.map((q) => ({
+  id: q.id,
+  question: q.question,
+  choices: q.choices,
+  correct:
+    "correctIndices" in q && Array.isArray((q as LegacyQuestionMulti).correctIndices)
+      ? (q as LegacyQuestionMulti).correctIndices!
+      : (q as LegacyQuestionSingle).correctIndex !== undefined
+      ? [(q as LegacyQuestionSingle).correctIndex!]
+      : [],
+  explication: q.explication,
+}));
 
-  // Utilisation des classes Tailwind pour le mode sombre
-  return (
-    <div className="flex flex-col items-center">
-      <div className="relative flex items-center justify-center" style={{ width: radius * 2, height: radius * 2 }}>
-        <svg height={radius * 2} width={radius * 2} className="drop-shadow-md">
-          <circle
-            className="dark:stroke-gray-700 dark:fill-gray-800"
-            stroke="#f3f4f6"
-            fill="#f9fafb"
-            strokeWidth={stroke}
-            r={normalizedRadius}
-            cx={radius}
-            cy={radius}
-          />
-          <circle
-            stroke={color}
-            fill="transparent"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={circumference + ' ' + circumference}
-            style={{ strokeDashoffset, transition: 'stroke-dashoffset 0.7s cubic-bezier(.4,2,.6,1)' }}
-            r={normalizedRadius}
-            cx={radius}
-            cy={radius}
-          />
-        </svg>
-        <span
-          className="absolute text-base font-extrabold select-none"
-          style={{ color: color, left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
-        >
-          {value}
-        </span>
-      </div>
-      <span className="text-xs mt-1 font-medium" style={{ color: labelColor }}>{label}</span>
-    </div>
-  );
-}
-
-function App() {
-  const QCM_SETS = [
-    { name: '2025', data: QCM_QUESTIONS },
-    { name: '2024', data: QCM_QUESTIONS_2024 },
-  ];
-  const [selectedQcm, setSelectedQcm] = useState(QCM_SETS[0]);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [score, setScore] = useState(0);
+/** ---- Composant App ---- **/
+export default function App() {
+  const questions = useMemo(() => shuffleArray(QUESTIONS), []);
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showAnswer, setShowAnswer] = useState(false);
-  const [quizCompleted, setQuizCompleted] = useState(false);
-  const [strictMode, setStrictMode] = useState(false);
-  const [answers, setAnswers] = useState<(number | null)[]>([]);
-  const [darkMode, setDarkMode] = useState(true); // sombre par défaut
-  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
+  const [score, setScore] = useState(0);
+  const [finished, setFinished] = useState(false);
 
-  const colors = darkMode
-    ? {
-      primary: '#6366f1', // indigo-500
-      secondary: '#a21caf',
-      background: '#18181b',
-      text: '#f3f4f6',
-      card: '#232336',
-      border: '#312e81',
-      progressBg: '#374151',
-      statLabel: '#d1d5db',
-      gradientStart: '#1e1b4b', // indigo-950
-      gradientMiddle: '#1e1e3b',
-      gradientEnd: '#0f172a', // slate-900
-    }
-    : {
-      primary: '#6366f1',
-      secondary: '#a21caf',
-      background: 'white',
-      text: '#111827',
-      card: 'white',
-      border: '#e0e7ff',
-      gradientStart: '#f8fafc', // slate-50
-      gradientMiddle: '#f1f5f9', // slate-100
-      gradientEnd: '#e2e8f0', // slate-200
-      progressBg: '#e5e7eb',
-      statLabel: '#6b7280',
-    };
+  const q = questions[index];
 
-  // Recharge et reset complet à chaque changement de QCM
-  useEffect(() => {
-    const shuffled = shuffleArray(selectedQcm.data);
-    setQuestions(shuffled);
-    setAnswers(Array(shuffled.length).fill(null));
-    setCurrentQuestionIndex(0);
-    setScore(0);
-    setShowAnswer(false);
-    setQuizCompleted(false);
-    setSelectedOption(null);
-  }, [selectedQcm]);
-
-  if (questions.length === 0) {
-    return <div className="min-h-screen flex items-center justify-center">Chargement…</div>;
-  }
-
-  const currentQuestion = questions[currentQuestionIndex];
-
-  const handleOptionSelect = (optionIndex: number) => {
-    if (showAnswer) return;
-    setSelectedOption(optionIndex);
+  const styles = {
+    page: { fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 880, margin: "0 auto" },
+    card: { border: "1px solid #ddd", borderRadius: 12, padding: 20, background: "#fff" },
+    btn: { padding: "10px 14px", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" as const },
+    choice: (active: boolean, ok: boolean, wrong: boolean) => ({
+      padding: "12px 14px",
+      borderRadius: 10,
+      border: `2px solid ${ok ? "#10b981" : wrong ? "#ef4444" : active ? "#3b82f6" : "#e5e7eb"}`,
+      background: active ? "#f8fafc" : "#f9fafb",
+      cursor: "pointer" as const,
+      textAlign: "left" as const,
+      width: "100%",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+    }),
+    small: { fontSize: 14, opacity: 0.8 },
+    badge: { fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#eef2ff", border: "1px solid #c7d2fe" },
   };
 
-  const calculateFinalScore = () => {
-    let rawScore = 0;
-    answers.forEach((answer, index) => {
-      if (answer === questions[index].correctIndex) {
-        rawScore += 1;
-      } else if (answer !== null && strictMode) {
-        rawScore -= 0.5;
-      }
-    });
-    // Ne pas forcer à 0, pour permettre les scores négatifs
-    return rawScore;
-  };
-
-  const getScoreOutOf20 = () => {
-    const rawScore = calculateFinalScore();
-    return (rawScore / questions.length) * 20;
-  };
-
-  const handleCheckAnswer = () => {
-    if (selectedOption === null) return;
-    setShowAnswer(true);
-    const newAnswers = [...answers];
-    newAnswers[currentQuestionIndex] = selectedOption;
-    setAnswers(newAnswers);
-    if (selectedOption === currentQuestion.correctIndex) {
-      setScore(score + 1);
-    } else if (strictMode) {
-      setScore(score - 0.5);
-    }
-  };
-
-  const handleNextQuestion = () => {
-    setSelectedOption(null);
-    setShowAnswer(false);
-    if (currentQuestionIndex < questions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
-    } else {
-      setQuizCompleted(true);
-    }
-  };
-
-  const resetQuiz = () => {
-    setQuestions(shuffleArray(questions));
-    setCurrentQuestionIndex(0);
-    setSelectedOption(null);
-    setScore(0);
-    setShowAnswer(false);
-    setQuizCompleted(false);
-    setAnswers(Array(questions.length).fill(null));
-  };
-
-  const getScoreMessage = () => {
-    const finalScore = getScoreOutOf20();
-    if (finalScore >= 16) return "Excellent !";
-    if (finalScore >= 14) return "Très bien !";
-    if (finalScore >= 12) return "Bien !";
-    if (finalScore >= 8) return "Passable";
-    return "À revoir";
-  };
-
-  const getStats = () => {
-    let correct = 0;
-    let incorrect = 0;
-    let unanswered = 0;
-    answers.forEach((answer, index) => {
-      if (answer === null) {
-        unanswered++;
-      } else if (answer === questions[index].correctIndex) {
-        correct++;
-      } else {
-        incorrect++;
-      }
-    });
-    return { correct, incorrect, unanswered };
-  };
-
-  if (quizCompleted) {
-    const stats = getStats();
-    const finalScore = getScoreOutOf20();
-    const passed = finalScore >= 8;
+  if (finished) {
     return (
-      <div className={`${darkMode ? 'dark' : ''} min-h-screen flex items-center justify-center p-4 bg-pattern animated-gradient`}>
-        <div className="rounded-xl shadow-2xl p-8 max-w-md w-full backdrop-blur-sm bg-white/80 dark:bg-gray-900/80" 
-          style={{ border: `1px solid ${colors.border}` }}>
-          <div className="flex flex-col items-center">
-            <Award className={`w-20 h-20 ${passed ? 'text-yellow-500' : 'text-gray-400'} mb-4`} />
-            <h1 className="text-3xl font-bold text-center mb-2" style={{ color: colors.text }}>Quiz Terminé !</h1>
-            <div className="w-full rounded-lg p-4 mb-4" style={{ background: colors.progressBg }}>
-              <div className="flex justify-between mb-2">
-                <span style={{ color: colors.text }}>Questions totales:</span>
-                <span className="font-bold" style={{ color: colors.text }}>{questions.length}</span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span style={{ color: colors.text }}>Bonnes réponses:</span>
-                <span className="font-bold text-green-600">{stats.correct}</span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span style={{ color: colors.text }}>Mauvaises réponses:</span>
-                <span className="font-bold text-red-600">{stats.incorrect}</span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span style={{ color: colors.text }}>Sans réponse:</span>
-                <span className="font-bold" style={{ color: colors.text }}>{stats.unanswered}</span>
-              </div>
-            </div>
-            <div className="w-full rounded-full h-4 mb-4" style={{ background: colors.progressBg }}>
-              <div
-                className={`h-4 rounded-full ${passed ? 'bg-green-500' : 'bg-red-500'}`}
-                style={{ width: `${(finalScore / 20) * 100}%` }}
-              ></div>
-            </div>
-            <p className="text-xl mb-2" style={{ color: colors.text }}>
-              Note finale: <span className="font-bold">{finalScore.toFixed(1)}/20</span>
-            </p>
-            <h2 className={`text-2xl font-bold mb-8 ${passed ? 'text-green-600' : 'text-red-600'}`}>{getScoreMessage()}</h2>
-            <button
-              onClick={resetQuiz}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105"
-            >
-              Recommencer le Quiz
-            </button>
-          </div>
+      <main style={styles.page}>
+        <div style={styles.card}>
+          <h1>🏆 Terminé !</h1>
+          <p style={{ marginTop: 8 }}>
+            Score : <b>{score}</b> / {questions.length}
+          </p>
+          <button style={{ ...styles.btn, marginTop: 12 }} onClick={() => location.reload()}>
+            Rejouer
+          </button>
         </div>
-      </div>
+      </main>
     );
   }
 
-  const stats = getStats();
+  if (!q) return null;
+
+  const isMulti = q.correct.length > 1;
+
+  const toggle = (i: number) => {
+    if (showAnswer) return;
+    const next = new Set(selected);
+    next.has(i) ? next.delete(i) : next.add(i);
+    setSelected(next);
+  };
+
+  const validate = () => {
+    if (selected.size === 0) return;
+    const good = new Set(q.correct);
+    const ok = setsEqual(selected, good); // score uniquement si 100% bon
+    if (ok) setScore((s) => s + 1);
+    setShowAnswer(true);
+  };
+
+  const next = () => {
+    if (index + 1 >= questions.length) setFinished(true);
+    else {
+      setIndex((i) => i + 1);
+      setSelected(new Set());
+      setShowAnswer(false);
+    }
+  };
 
   return (
-    <div className={`${darkMode ? 'dark' : ''} min-h-screen flex flex-col items-center justify-center p-4 bg-pattern animated-gradient`}>
-      {/* Titre, icône, toggle dark mode et sélecteur QCM */}
-      <div className="flex justify-center w-full mb-4 max-w-5xl">
-        <div className="rounded-xl shadow-lg p-4 flex flex-col items-center max-w-5xl w-full backdrop-blur-sm bg-white/90 dark:bg-gray-900/80" style={{ border: `1px solid ${colors.border}` }}>
-          <div className="flex items-center gap-3 justify-center w-full">
-            <BookOpen className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
-            <h1 className="text-2xl font-extrabold tracking-tight text-center flex-1" style={{ color: colors.text }}>Droit du travail</h1>
-            {/* Toggle dark mode et sélecteur QCM */}
-            <div className="flex items-center gap-2">
-              <span>{darkMode ? <Moon className="w-6 h-6 text-indigo-600" /> : <Sun className="w-6 h-6 text-yellow-400" />}</span>
-              <button
-                onClick={() => setDarkMode((v) => !v)}
-                className={`relative w-12 h-6 flex items-center rounded-full transition-colors duration-200 ${darkMode ? 'bg-indigo-600' : 'bg-gray-300'}`}
-                aria-pressed={darkMode}
-                title={darkMode ? 'Désactiver le mode sombre' : 'Activer le mode sombre'}
-              >
-                <span className={`absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${darkMode ? 'translate-x-6' : ''}`}></span>
-              </button>
-              {/* Sélecteur QCM déplacé ici */}
-              <select
-                id="qcm-select"
-                value={selectedQcm.name}
-                onChange={e => {
-                  const found = QCM_SETS.find(q => q.name === e.target.value);
-                  if (found) setSelectedQcm(found);
-                }}
-                className="rounded-lg border border-indigo-200 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900 text-indigo-700 dark:text-indigo-200 font-bold shadow focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              >
-                {QCM_SETS.map(qcm => (
-                  <option key={qcm.name} value={qcm.name}>{qcm.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+    <main style={styles.page}>
+      <header style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+        <h1>📘 QCM ABD</h1>
+        <div style={styles.small}>
+          Question {index + 1} / {questions.length} • Score {score}
         </div>
-      </div>
-      
-      {/* Container pour la carte principale et les stats (côte à côte sur desktop, empilés sur mobile) */}
-      <div className="flex flex-col lg:flex-row justify-center w-full max-w-5xl gap-4">
-        {/* Card stats réponses/scores avec cercles dynamiques - Verticale sur desktop, horizontale sur mobile */}
-        <div className="flex lg:flex-col mb-4 lg:mb-0 lg:w-1/5 order-1 lg:order-2">
-          <div className="rounded-xl shadow-lg p-4 flex flex-wrap lg:flex-col items-center gap-8 w-full justify-center backdrop-blur-sm bg-white/90 dark:bg-gray-900/80" style={{ border: `1px solid ${colors.border}` }}>
-            <StatCircle value={stats.correct} max={questions.length} color="#22c55e" label="Bonnes" labelColor={colors.statLabel} />
-            <StatCircle value={stats.incorrect} max={questions.length} color="#ef4444" label="Mauvaises" labelColor={colors.statLabel} />
-            <StatCircle value={stats.unanswered} max={questions.length} color="#6b7280" label="Non répondues" labelColor={colors.statLabel} />
-            <StatCircle value={calculateFinalScore()} max={questions.length} color="#a21caf" label="Score" labelColor={colors.statLabel} />
-          </div>
+      </header>
+
+      <div style={styles.card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <h2 style={{ margin: 0 }}>{q.question}</h2>
+          {isMulti && <span style={styles.badge}>Plusieurs réponses</span>}
         </div>
-        
-        {/* Carte principale responsive */}
-        <div className="rounded-2xl shadow-2xl p-6 max-w-3xl w-full relative border flex flex-col backdrop-blur-sm bg-white/90 dark:bg-gray-900/80 order-2 lg:order-1" style={{ borderColor: colors.border }}>
-        <div className="flex justify-between items-center mb-4">
-          <span className="text-sm font-medium" style={{ color: colors.text }}>
-            Question {currentQuestionIndex + 1}/{questions.length}
-          </span>
+
+        <ul style={{ marginTop: 16, listStyle: "none", padding: 0, display: "grid", gap: 8 }}>
+          {q.choices.map((c, i) => {
+            const isCorrect = q.correct.includes(i);
+            const isSelected = selected.has(i);
+            const showOk = showAnswer && isCorrect;
+            const showWrong = showAnswer && isSelected && !isCorrect;
+
+            return (
+              <li key={i}>
+                <button onClick={() => toggle(i)} disabled={showAnswer} style={styles.choice(isSelected, showOk, showWrong)}>
+                  <input type="checkbox" readOnly checked={isSelected} />
+                  <span>{showOk ? "✅ " : showWrong ? "❌ " : isSelected ? "👉 " : "• "}{c}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          {!showAnswer ? (
+            <button
+              style={{ ...styles.btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+              onClick={validate}
+              disabled={selected.size === 0}
+            >
+              Valider ➜
+            </button>
+          ) : (
+            <button
+              style={{ ...styles.btn, background: "#10b981", color: "#fff", borderColor: "#10b981" }}
+              onClick={next}
+            >
+              Suivant ➜
+            </button>
+          )}
         </div>
-        <div className="w-full rounded-full h-2 mb-6" style={{ background: colors.progressBg }}>
-          <div
-            className="h-2 rounded-full transition-all duration-300"
-            style={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%`, background: colors.primary }}
-          ></div>
-        </div>
-        <h2 className="text-xl font-bold mb-6 text-center" style={{ color: colors.text }}>{currentQuestion.question}</h2>
-        
-        {/* Encart d'explication qui apparaît après avoir répondu */}
-        {showAnswer && (
-          <div className={`p-4 mb-6 rounded-lg flex items-start gap-3 animate-fadeIn bg-opacity-20 
-            ${selectedOption === currentQuestion.correctIndex 
-              ? 'bg-green-100 dark:bg-green-900/30 border-l-4 border-green-500' 
-              : 'bg-amber-100 dark:bg-amber-900/30 border-l-4 border-amber-500'}`}>
-            <Lightbulb className={`w-6 h-6 mt-1 flex-shrink-0 
-              ${selectedOption === currentQuestion.correctIndex 
-                ? 'text-green-600 dark:text-green-400' 
-                : 'text-amber-600 dark:text-amber-400'}`} />
-            <div>
-              <h3 className={`font-semibold mb-1 
-                ${selectedOption === currentQuestion.correctIndex 
-                  ? 'text-green-800 dark:text-green-400' 
-                  : 'text-amber-800 dark:text-amber-400'}`}>
-                {selectedOption === currentQuestion.correctIndex ? 'Bonne réponse !' : 'Explication :'}
-              </h3>
-              <p className="text-sm leading-relaxed" style={{ color: colors.text }}>{currentQuestion.explication}</p>
-            </div>
-          </div>
+
+        {showAnswer && q.explication && (
+          <p style={{ ...styles.small, marginTop: 12 }}>
+            <b>Explication :</b> {q.explication}
+          </p>
         )}
-        
-        <div className="space-y-3 mb-6">
-          {currentQuestion.choices.map((option, index) => (
-            <button
-              key={index}
-              onClick={() => handleOptionSelect(index)}
-              className={`w-full text-left p-4 rounded-lg border-2 transition-all flex items-center justify-between gap-2 text-base font-medium shadow-sm
-                ${selectedOption === index
-                  ? showAnswer
-                    ? index === currentQuestion.correctIndex
-                      ? 'border-green-500 bg-green-50 dark:bg-green-900/30'
-                      : 'border-red-500 bg-red-50 dark:bg-red-900/30'
-                    : 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/30'
-                  : showAnswer && index === currentQuestion.correctIndex
-                    ? 'border-green-500 bg-green-50 dark:bg-green-900/30'
-                    : 'border-gray-100 dark:border-gray-700 hover:border-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}
-              `}
-              disabled={showAnswer}
-              style={{ color: colors.text }}
-            >
-              <span>{option}</span>
-              {showAnswer && index === currentQuestion.correctIndex && (
-                <Check className="w-5 h-5 text-green-500" />
-              )}
-              {showAnswer && selectedOption === index && index !== currentQuestion.correctIndex && (
-                <X className="w-5 h-5 text-red-500" />
-              )}
-            </button>
-          ))}
-        </div>
-        {!showAnswer ? (
-          <div className="flex gap-2">
-            <button
-              onClick={handleCheckAnswer}
-              disabled={selectedOption === null}
-              className={`flex-1 py-3 rounded-lg font-bold transition-all text-lg shadow-md
-                ${selectedOption === null
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-700 dark:text-gray-400'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'}
-              `}
-            >
-              Vérifier
-            </button>
-            <button
-              onClick={() => handleNextQuestion()}
-              disabled={showAnswer}
-              className="flex-1 py-3 rounded-lg font-bold transition-all text-lg shadow-md bg-indigo-500 hover:bg-indigo-600 text-white border border-indigo-500"
-            >
-              Passer
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={handleNextQuestion}
-            className="w-full py-3 rounded-lg font-bold transition-all flex items-center justify-center text-lg shadow-md bg-indigo-600 hover:bg-indigo-700 text-white"
-          >
-            {currentQuestionIndex < questions.length - 1 ? 'Question Suivante' : 'Voir les Résultats'}
-            <ChevronRight className="w-5 h-5 ml-1" />
-          </button>
-        )}
-        {/* Toggle mode strict sous la carte */}
-        <div className="flex flex-col items-center gap-2 mt-8 self-center">
-          <span className="text-sm" style={{ color: colors.text }}>Le mode strict retire 0,5 point pour chaque mauvaise réponse.</span>
-          <div className="flex items-center gap-3">
-            <span className="font-medium" style={{ color: colors.text }}>Mode strict</span>
-            <button
-              onClick={() => setStrictMode((v) => !v)}
-              className={`relative w-12 h-6 flex items-center rounded-full transition-colors duration-200 ${strictMode ? 'bg-indigo-600' : 'bg-gray-300'}`}
-              aria-pressed={strictMode}
-            >
-              <span className={`absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${strictMode ? 'translate-x-6' : ''}`}></span>
-            </button>
-            <span className={`ml-2 text-xs font-semibold ${strictMode ? 'text-indigo-600' : 'text-gray-400'}`}>{strictMode ? 'Activé' : 'Désactivé'}</span>
-          </div>
-        </div>
-        {/* Bouton voir toutes les questions */}
-        <button
-          onClick={() => setShowQuestionsModal(true)}
-          className="mt-8 w-full py-2 rounded-lg font-bold transition-all text-base shadow bg-gray-200 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 dark:bg-gray-800 dark:text-indigo-200 dark:hover:bg-indigo-900 dark:border-gray-700"
-        >
-          Voir toutes les questions
-        </button>
-        {/* Bouton recommencer en bas */}
-        <button
-          onClick={resetQuiz}
-          className="mt-8 w-full py-2 rounded-lg font-bold transition-all text-base shadow bg-indigo-500 hover:bg-indigo-600 text-white border border-indigo-500"
-        >
-          Recommencer
-        </button>
       </div>
-    </div>
-      {/* Vagues décoratives en bas de page */}
-      <div className="wave"></div>
-      {/* Modal questions */}
-      {showQuestionsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 relative border border-indigo-200 dark:border-gray-700 animate-fadeIn">
-            <button
-              onClick={() => setShowQuestionsModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-300 text-2xl font-bold"
-              aria-label="Fermer"
-            >
-              ×
-            </button>
-            <h2 className="text-2xl font-bold mb-6 text-center text-indigo-700 dark:text-indigo-300">Toutes les questions</h2>
-            <ol className="space-y-6">
-              {selectedQcm.data.map((q, idx) => (
-                <li key={q.id} className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className="font-bold text-indigo-600 dark:text-indigo-300">{idx + 1}.</span>
-                    <span className="font-semibold" style={{ color: colors.text }}>{q.question}</span>
-                  </div>
-                  <div className="mb-1">
-                    <span className="font-medium text-green-700 dark:text-green-400">Bonne réponse :</span>
-                    <span className="ml-2 font-semibold" style={{ color: colors.text }}>{q.choices[q.correctIndex]}</span>
-                  </div>
-                  <div className="text-sm text-gray-700 dark:text-gray-300 mt-1">
-                    <span className="font-medium text-indigo-700 dark:text-indigo-300">Explication :</span>
-                    <span className="ml-2" style={{ color: colors.text }}>{q.explication}</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }
-
-export default App;
